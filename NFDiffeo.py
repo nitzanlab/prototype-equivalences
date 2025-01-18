@@ -625,7 +625,11 @@ class PPT(nn.Module):
 
 
 class Affine(nn.Module):
-
+    """
+    An affine transformation module of a normalizing flow. To ensure invertibility, this transformation is defined as:
+                                        y = WW^Tx + exp[phi] x + mu
+    where the learnable parameters are W (with shape [dim, rank]), phi (with shape [dim]), and mu (with shape [dim])
+    """
     def __init__(self, dim: int, rank: int=None, data_init: bool=False):
         super().__init__()
         if rank is None: rank = dim
@@ -772,7 +776,9 @@ class ActNorm(nn.Module):
 
 
 class NFCompose(nn.Module):
-
+    """
+    Composes a number of normalizing-flow layers into one, similar to nn.Sequential
+    """
     def __init__(self, *modules: nn.Module):
         super().__init__()
         self.transfs = nn.ModuleList(modules)
@@ -819,11 +825,24 @@ class NFCompose(nn.Module):
 
 class Diffeo(nn.Module):
 
-    def __init__(self, dim: int, rank: int=None, n_layers: int=4, K: int=15, add_log: bool=False,
+    def __init__(self, dim: int, rank: int=2, n_layers: int=4, K: int=15, add_log: bool=False,
                  MLP: bool=False, actnorm: bool=True, RFF: bool=False, scale_free: bool=False,
                  affine_init: bool=False):
+        """
+        Initializes a diffeomorphism, which is a normalizing flow with interleaved Affine transformations and
+        AffineCoupling layers
+        :param dim: the dimension of the data
+        :param rank: the rank used in the Affine transformations (see the Affine object above)
+        :param n_layers: number of Affine-Coupling-ReverseCoupling layers to use
+        :param K: number of hidden units to use, either for the FFCoupling, MLP or RFF transformations
+        :param add_log: whether to add an intial invertible log-transform on the data (a sort of preprocessing)
+        :param MLP: if True, an AffineCoupling layer with an MLP will be used instead of the FFCoupling layer
+        :param actnorm: whether the first layer is an invertible standardization of the data (a sort of preprocessing)
+        :param RFF: if True, an AffineCoupling layer with an RFF will be used instead of the FFCoupling layer
+        :param scale_free: whether to use FFCoupling layers which are scale-free - only have a translation transform
+        :param affine_init: whether to use a sort of initialization over the Affine transformation
+        """
         super().__init__()
-        if rank is None: rank = dim
 
         layers = []
         if add_log: layers.append(LogTransf())
@@ -864,22 +883,28 @@ class Diffeo(nn.Module):
         return self.transf.jacobian(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Calculates the forward transformation of the normalizing flow
+        :param x: inputs as a torch tensor with shape [N, dim]
+        :return: the transformed inputs, a tensor with shape [N, dim]
+        """
         return self.transf.forward(x)
 
     def jvp_forward(self, x: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Calculates the forward transformation of the normalizing flow, plus a JVP and the log-determinant
+        :param x: inputs as a torch tensor with shape [N, dim]
+        :param f: vectors whose JVP should be calculated, a torch tensor with shape [N, dim]
+        :return: - the transformed inputs, a tensor with shape [N, dim]
+                 - the JVPs of the normalizing flow on the vectors in f, a tensor with shape [N, dim]
+                 - the log-determinants of the normalizing flows on x, a tensor with shape [N]
+        """
         return self.transf.jvp_forward(x, f)
 
     def reverse(self, y: torch.Tensor) -> torch.Tensor:
+        """
+        Calculates the reverse transformation of the normalizing flow
+        :param y: inputs as a torch tensor with shape [N, dim]
+        :return: the transformed inputs, a tensor with shape [N, dim]
+        """
         return self.transf.reverse(y)
-
-    def fit(self, x: torch.Tensor, y: torch.Tensor, lamb: float=0, lr: float=5e-3, its: int=100):
-        for param in self.parameters(): param.requires_grad = True
-        optim = Adam(self.parameters(), lr=lr)
-        for i in range(its):
-            optim.zero_grad()
-            pred, _, det = self.jvp_forward(x, x)
-            loss = torch.mean((pred-y)**2) + lamb*torch.abs(det).mean()
-            loss.backward()
-            optim.step()
-        for param in self.parameters(): param.requires_grad = False
-        return self
