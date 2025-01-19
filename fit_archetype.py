@@ -17,14 +17,21 @@ _default_archetypes = [
 ]
 
 
-def equiv_err(xdot, jvp, ydot, soequiv: bool=True):
+def equiv_err(xdot, jvp, ydot, soequiv: bool=True, noise: float=0.):
     # define the MSE error for the equivalence used
     if soequiv:
         # smooth orbital equivalence
-        return jvp / torch.norm(jvp, dim=-1, keepdim=True) - ydot / torch.norm(ydot, dim=-1, keepdim=True)
+        err = (jvp / torch.norm(jvp, dim=-1, keepdim=True) - ydot / torch.norm(ydot, dim=-1, keepdim=True))**2
     else:
         # dynamical orbital equivalence
-        return xdot / torch.norm(xdot, dim=-1, keepdim=True) - ydot / torch.norm(ydot, dim=-1, keepdim=True)
+        err = (xdot / torch.norm(xdot, dim=-1, keepdim=True) - ydot / torch.norm(ydot, dim=-1, keepdim=True))**2
+
+    # if no noise, return unweighted samples
+    if noise == 0: return err
+    else:
+        norms = torch.norm(ydot, dim=-1, keepdim=True)**2
+        nvar = noise*noise
+        return err/(1+nvar/norms)
 
 
 def proj_loss(x, y, H, proj_var):
@@ -41,7 +48,8 @@ def proj_loss(x, y, H, proj_var):
 
 def fit_DFORM(H: nn.Module, x: torch.Tensor, xdot: torch.Tensor, g: Callable, its: int=300, lr: float=5e-3,
               verbose=False, freeze_frac: float=.0, det_reg: float=.0, center_reg: float=.0, weight_decay: float=1e-3,
-              proj_reg: float=None, soequiv: bool=True, dim2_weight: float=None, test_fr: float=0):
+              proj_reg: float=None, soequiv: bool=True, dim2_weight: float=None, test_fr: float=0,
+              noise: float=0.):
     """
     Fits the supplied observations to the given archetype g using a variant of the smooth-equivalence loss defined in
     DFORM under the diffeomorophism H
@@ -65,6 +73,7 @@ def fit_DFORM(H: nn.Module, x: torch.Tensor, xdot: torch.Tensor, g: Callable, it
                         weight defaults to 2/dim, the natural choice
     :param test_fr: if this value is bigger than 0, then the loss/score/ldet are all calculated with respect to a test
                     set that is held-out during training; test_fr is the fraction of points to test (between 0 and 1)
+    :param noise: the standard deviation of the noise assumed to exist in the vector data, used for weighting loss
     :return: - the fitted network, H
              - the average loss over all observed vectors
              - the average log-determinant over all observed vectors
@@ -111,13 +120,13 @@ def fit_DFORM(H: nn.Module, x: torch.Tensor, xdot: torch.Tensor, g: Callable, it
         y, jvp, ldet = H.jvp_forward(x, xdot)   # calculate transformed inputs
         ydot = g(y)  # velocities of vectors of archetypes
 
-        err = equiv_err(xdot, jvp, ydot, soequiv)  # calculate the error according to the equivalence
+        err = equiv_err(xdot, jvp, ydot, soequiv, noise=noise)  # calculate the error according to the equivalence
         if dim2_weight is None:  # assumes all dimensions are the same
-            mseloss = torch.mean(err**2)
+            mseloss = torch.mean(err)
         else:  # gives a different weight to the first two dimensions than all the other (0 < dim2_weight < 1)
             dim = err.shape[-1]
-            loss2 = torch.mean(err[:, :2]**2)*2/dim
-            loss_other = torch.mean(err[:, 2:]**2)*(dim-2)/dim
+            loss2 = torch.mean(err[:, :2])*2/dim
+            loss_other = torch.mean(err[:, 2:])*(dim-2)/dim
             mseloss = dim2_weight*loss2 + (1-dim2_weight)*loss_other
 
         dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
@@ -143,9 +152,9 @@ def fit_DFORM(H: nn.Module, x: torch.Tensor, xdot: torch.Tensor, g: Callable, it
         ploss = proj_loss(x, y, H, proj_reg).item() if proj_reg is not None else 0
 
     ydot = g(y)
-    err = equiv_err(xdot, jvp, ydot) if x_test is None else equiv_err(xdot_test, jvp, ydot)
-    score = torch.mean(err[:, :2]**2).item()
-    loss = torch.mean(err**2).item() + ploss
+    err = equiv_err(xdot, jvp, ydot, noise=noise) if x_test is None else equiv_err(xdot_test, jvp, ydot, noise=noise)
+    score = torch.mean(err[:, :2]).item()
+    loss = torch.mean(err).item() + ploss
     ldet = torch.mean(ldet.detach()).item()
     # ==================================================================================================================
 

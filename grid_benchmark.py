@@ -81,7 +81,7 @@ def traj_in_vecs(x: torch.Tensor, xdot: torch.Tensor, arch: PhaseSpace, H: Diffe
     plt.title(title_str, color=color)
 
 
-def DFORM_classify(x, xdot, its, lr, n_layers, n_freqs, freeze_frac, path, true_sign):
+def DFORM_classify(x, xdot, its, lr, n_layers, n_freqs, freeze_frac, path, true_sign, alg_noise):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     results = {
@@ -97,7 +97,8 @@ def DFORM_classify(x, xdot, its, lr, n_layers, n_freqs, freeze_frac, path, true_
         archetype = get_oscillator(a=a, omega=omega)
         H = Diffeo(dim=2, n_layers=n_layers, K=n_freqs, rank=2).to(device)
         H, loss, ldet, score = fit_DFORM(H, x.clone().to(device), xdot.clone().to(device), archetype, its=its,
-                                         verbose=False, lr=lr, freeze_frac=freeze_frac, weight_decay=1e-4)
+                                         verbose=False, lr=lr, freeze_frac=freeze_frac, weight_decay=1e-4,
+                                         noise=alg_noise)
         results['losses'].append(loss)
         results['logdets'].append(ldet)
         results['2Dlosses'].append(score)
@@ -127,8 +128,9 @@ def DFORM_classify(x, xdot, its, lr, n_layers, n_freqs, freeze_frac, path, true_
 @click.option('--n_freqs',  help='number of frequencies in coupling', type=int, default=5)
 @click.option('--fr_rat',   help='ratio of iterations during which scale params are frozen', type=float, default=.2)
 @click.option('--noise',    help='amount of noise to add to velocities', type=float, default=.0)
+@click.option('--alg_noise', help='amount of noise expected by the algorithm', type=float, default=.01)
 def classify_all(type: str, n: int, job: int, lr: float, its: int, n_layers: int,
-                 n_freqs: int, fr_rat: float, noise: float):
+                 n_freqs: int, fr_rat: float, noise: float, alg_noise: float):
     sz = 1
     yy, xx = np.meshgrid(np.linspace(-sz, sz, 64), np.linspace(-sz, sz, 64))
     pos = torch.from_numpy(np.stack([xx, yy]).T).float().reshape(-1, 2)
@@ -160,7 +162,7 @@ def classify_all(type: str, n: int, job: int, lr: float, its: int, n_layers: int
 
         results = DFORM_classify(x, xdot, its=its, lr=lr, n_layers=n_layers, n_freqs=n_freqs,
                                  freeze_frac=fr_rat, path=f'{path}{job}_{i}.png',
-                                 true_sign=-1 if true_labels[i][0]==4 else 1)
+                                 true_sign=-1 if true_labels[i][0]==4 else 1, alg_noise=alg_noise)
         res_dict['params'].append(true_params[i])
         res_dict['true_labels'].append(true_labels[i])
         res_dict['losses'].append(results['losses'])
