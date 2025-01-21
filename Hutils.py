@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from scipy.optimize import minimize
 from scipy import interpolate
+from NFDiffeo import Diffeo
 
 
 def cartesian_to_polar(x, y):
@@ -91,6 +92,33 @@ def get_oscillator(a: float, omega: float, decay: float=1):
         ydot = torch.sin(theta)*rdot + r*torch.cos(theta)*omega
         return torch.cat([xdot[..., None], ydot[..., None], -decay*nonosc], dim=-1).reshape(shape)
     return func
+
+
+def project_onto_attractor(a: float, x: torch.Tensor) -> torch.Tensor:
+    """
+    Projects the observed points in x onto the attractor of a simple oscillator whose damping coefficient is a
+    :param a: the damping coefficient of the simple oscillator prototype
+    :param x: points to project onto the simple oscillator, a torch tensor of shape [N, dim]
+    :return: the points, projected onto the invariant set of the oscillator defined by the damping coefficient a
+    """
+    rad = np.sqrt(a) if a > 0 else 0
+    osc = rad*x[:, :2]/torch.norm(x[:, :2], dim=1, keepdim=True)
+    nonosc = torch.zeros_like(x[:, 2:])
+    return torch.cat([osc, nonosc], dim=1)
+
+
+def cycle_error(H: Diffeo, x: torch.Tensor, a: float) -> float:
+    """
+    Calculates the cycle error of the observed points x
+    :param H: the diffeomorphism to the simple oscillator prototype whose damping coefficient is the input "a"
+    :param x: the trajectory, a torch tensor with shape [N, dim]
+    :param a: the damping coefficient of the SO prototype
+    :return: the cycle error of x onto the invariant set defined by the diffeomorphism H
+    """
+    y = H.reverse(project_onto_attractor(a, H(x)))
+    err = (y-x)**2
+    norm = torch.std(x)
+    return torch.mean(err/norm).item()
 
 
 def interp_vectors(x: torch.Tensor, xdot: torch.Tensor, pos: torch.Tensor=None, smoothing: float=.5,

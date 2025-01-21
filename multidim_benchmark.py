@@ -5,8 +5,8 @@ import torch
 import pickle
 import click
 from pathlib import Path
-from Hutils import get_oscillator, simulate_trajectory
-from systems import LinearAug, QuadAug, DiffeoAug, ComposeAug, PhaseSpace, PermuteAug, Augmentation
+from Hutils import get_oscillator, simulate_trajectory, cycle_error
+from systems import LinearAug, QuadAug, DiffeoAug, ComposeAug, PhaseSpace, Augmentation
 from systems import SO, Selkov, BZreaction, Repressilator, VanDerPol, LienardSigmoid, LienardPoly, SubcriticalHopf, \
     SupercriticalHopf
 from matplotlib import pyplot as plt
@@ -206,26 +206,29 @@ def compile_results(path: str, dim: int):
 @click.option('--noise',    help='amount of noise to add to phase space', type=float, default=0)
 @click.option('--dim2_weight', help='relative weight of the first 2 dimensions', type=float, default=-1)
 @click.option('--save_h',   help='whether to save the model', type=int, default=0)
+@click.option('--rep',      help='repitition of the experiment (basically just adds a number to the start of the path', type=int, default=0)
+@click.option('--w_decay',  help='weight decay used', type=float, default=1e-3)
 def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_layers: int,
                  n_freqs: int, fr_rat: float, dim: int, time: float,
                  det_reg: float, cen_reg: float, proj_reg: float,
                  linaug: float, quadaug: float, diffaug: float, verbose: int, noise: float,
-                 dim2_weight: float, save_h: int):
-    # ============================================ create directory ====================================
+                 dim2_weight: float, save_h: int, rep, w_decay):
+    # ============================================ create directory ====================================================
     assert exp_type in list(SYSTEMS.keys())
 
-    path = root + f'{exp_type}_dim={dim}/lin{linaug}quad{quadaug}diff{diffaug}_' +\
+    path = root + f'{exp_type}_dim={dim}/' +\
+                  (f'lin{linaug}quad{quadaug}diff{diffaug}_' if dim > 2 else '') +\
                   f'its={its}_npts={n_points}_freqs={n_freqs}_layers={n_layers}' +\
                   (f'_proj={proj_reg:.1f}' if dim > 2 else '') +\
                   (f'_noise={noise:.2f}' if noise > 0 else '') +\
-                  (f'_time={time:.1f}' if time != 10. else '') +\
-                  f'/'
+                  f'_time={time:.1f}' +\
+                  f'/rep={rep}/'
     Path(path).mkdir(parents=True, exist_ok=True)
 
     if dim == 2 or proj_reg <= -10: proj_reg = None
-    # ============================================ create directory ====================================
+    # ============================================ create directory ====================================================
 
-    # ============================================ create log ==========================================
+    # ============================================ create log ==========================================================
     open(path + f'{job}.log', 'w').close()
     handlers = [logging.FileHandler(path + f'{job}.log'), logging.StreamHandler(sys.stdout)]
     logging.basicConfig(format='',
@@ -234,28 +237,30 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
                         )
 
     logging.info('\n'.join(f'{k}={v}' for k, v in locals().items()))
-    # ============================================ create log ==========================================
+    # ============================================ create log ==========================================================
 
     torch.manual_seed(job)
     np.random.seed(job)
 
     system = SYSTEMS[exp_type]()
 
+    # ============================================ add augmentations ===================================================
     augmentaions = []
     if linaug > 0: augmentaions.append(LinearAug(dim=dim))
     if quadaug > 0: augmentaions.append(QuadAug(dim=dim, amnt=quadaug))
     if diffaug > 0: augmentaions.append(DiffeoAug(dim=dim, init_amnt=diffaug))
     augment = ComposeAug(*augmentaions)
     parameters = system.parameters
+    # ============================================ add augmentations ===================================================
 
     logging.info('\n\n')
     logging.info('; '.join(f'{k}={v:.2f}' for k, v in parameters.items()))
 
     # plot the underlying latent system
-    plot_trajectory(dim, system, time, path + f'{job}_original_trajectories.png')
+    if dim > 2: plot_trajectory(dim, system, time, path + f'{job}_original_trajectories.png')
 
     # plot the observed (augmented) system
-    if linaug > 0 or quadaug > 0 or diffaug > 0:
+    if (linaug > 0 or quadaug > 0 or diffaug > 0) and dim > 2:
         plot_trajectory(dim, system, time, path + f'{job}_augmented_trajectories.png', aug=augment)
 
     # iterate points on trajectory for a bit, so they'll be closer to the invariant set
@@ -279,6 +284,7 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
         'losses': [],
         'logdets': [],
         '2Dlosses': [],
+        'cycle-errors': [],
         'data_mean': torch.mean(x).item(),
         'data_std': torch.std(x).item(),
         'params': parameters,
@@ -288,28 +294,38 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
 
     x, dx = x.to(device), dx.to(device)
 
+    # allow for different repititions to initialize different network parameters
+    torch.manual_seed(job + 1000*rep)
+    np.random.seed(job + 1000*rep)
+
+    # calculate trajectory for calculating the cycle errors
+    cycle_traj = system.trajectories(x[:1], T=50)
+    cycle_traj = cycle_traj[cycle_traj.shape[0]//2:][:, 0]
+
     plt.figure(figsize=(7, 4*len(archetypes)//2))
     subplot = 1
     for (a, omega, decay) in res_dict['archetypes']:
-        # ============================================ fit archetype ==========================================
+        # ============================================ fit archetype ===================================================
         archetype = get_oscillator(a=a, omega=omega, decay=decay)
         H = Diffeo(dim=dim, n_layers=n_layers, K=n_freqs, rank=2).to(device)
         H, loss, ldet, score = fit_DFORM(H, x.clone(), dx.clone(), archetype, its=its,
                                          verbose=verbose>0, lr=lr, freeze_frac=fr_rat, det_reg=det_reg,
-                                         center_reg=cen_reg, proj_reg=proj_reg, weight_decay=1e-3,
+                                         center_reg=cen_reg, proj_reg=proj_reg, weight_decay=w_decay,
                                          dim2_weight=None if dim2_weight < 0 else dim2_weight)
 
-        # ============================================ save stats on fit ==========================================
+        # ============================================ save stats on fit ===============================================
         res_dict['losses'].append(loss)
         res_dict['logdets'].append(ldet)
         res_dict['2Dlosses'].append(score)
+        cerr = cycle_error(H, cycle_traj.to(device), a)
+        res_dict['cycle-errors'].append(cerr)
 
-        logging.info(f'\narchetype a={a:.2f} om={omega:.2f}: loss={loss:.4f}; ldet={ldet:.2f}, 2D loss={score:.3f}')
+        logging.info(f'archetype a={a:.2f} om={omega:.2f}: loss={loss:.4f}; ldet={ldet:.2f}, 2D loss={score:.3f}\n')
         # ============================================ plots ==========================================
         plt.subplot(len(archetypes)//2, 2, subplot)
         traj_in_vecs(x.clone(), dx.clone(), system, SO(a=a, omega=omega, decay=decay),
-                     H, T=20, extra_str=f'loss={loss:.3f} ; ldet={ldet:.3f}\n2D-loss={score:.3f}', aug=augment,
-                     color='blue' if np.sign(a)==np.sign(system.parameters['bif']) else 'red')
+                     H, T=20, extra_str=f'loss={loss:.3f} ; ldet={ldet:.3f}\ncycle={cerr:.2f} ; 2D-loss={score:.3f}',
+                     aug=augment, color='blue' if np.sign(a)==np.sign(system.parameters['bif']) else 'red')
         subplot += 1
         if save_h > 0: torch.save(H, path + f'{job}_a={a:.2f}_om={omega:.2f}.pth')
     plt.tight_layout()
