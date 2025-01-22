@@ -196,8 +196,8 @@ def compile_results(path: str, dim: int):
 @click.option('--fr_rat',   help='ratio of iterations during which scale params are frozen', type=float, default=.25)
 @click.option('--dim',      help='the dimensionality of the data', type=int, default=2)
 @click.option('--time',     help='amount of time for discretization', type=float, default=20.)
-@click.option('--det_reg',  help='regularization of the determinant ', type=float, default=.0)
-@click.option('--cen_reg',  help='regularization of the origin ', type=float, default=.0)
+@click.option('--det_reg',  help='regularization of the determinant ', type=float, default=1e-3)
+@click.option('--cen_reg',  help='regularization of the origin ', type=float, default=1e-6)
 @click.option('--proj_reg', help='regularization for the 2D projections', type=float, default=-1)
 @click.option('--linaug',   help='whether to add a linear augmentation', type=float, default=0)
 @click.option('--quadaug',  help='strength of the quadratic augmentation', type=float, default=0)
@@ -208,11 +208,12 @@ def compile_results(path: str, dim: int):
 @click.option('--save_h',   help='whether to save the model', type=int, default=0)
 @click.option('--rep',      help='repitition of the experiment (basically just adds a number to the start of the path', type=int, default=0)
 @click.option('--w_decay',  help='weight decay used', type=float, default=1e-3)
+@click.option('--rem_small', help='if 1, removes velocities with norms that are small compared to the observed noise (as preprocessing)', type=int, default=1)
 def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_layers: int,
                  n_freqs: int, fr_rat: float, dim: int, time: float,
                  det_reg: float, cen_reg: float, proj_reg: float,
                  linaug: float, quadaug: float, diffaug: float, verbose: int, noise: float,
-                 dim2_weight: float, save_h: int, rep, w_decay):
+                 dim2_weight: float, save_h: int, rep, w_decay, rem_small):
     # ============================================ create directory ====================================================
     assert exp_type in list(SYSTEMS.keys())
 
@@ -271,6 +272,11 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
     # augment points
     x, dx = augment(0, x, dx)
     dx = dx + torch.randn_like(dx)*noise
+
+    # as a preprocessing step for our method, removes all vectors with norms that are too small compared to noise
+    if rem_small == 1 and noise > 0:
+        norms = torch.norm(dx, dim=1)
+        x, dx = x[norms > dim*noise], dx[norms > dim*noise]
 
     archetypes = [
         [-.25, -.5, .25],
