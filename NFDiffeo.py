@@ -172,8 +172,8 @@ class FFCoupling(nn.Module):
         super().__init__()
         self.reord = reverse
         x1, x2 = self._split(torch.zeros(1, dim))
-        self.a_s = nn.Parameter(1e-2*torch.randn(K, x1.shape[-1], x2.shape[-1]))
-        self.a_t = nn.Parameter(1e-2*torch.randn(K, x1.shape[-1], x2.shape[-1]))
+        self.a_s = nn.Parameter(1e-3*torch.randn(K, x1.shape[-1], x2.shape[-1]))
+        self.a_t = nn.Parameter(1e-3*torch.randn(K, x1.shape[-1], x2.shape[-1]))
         self.b_s = nn.Parameter(torch.rand(K, x1.shape[-1])*2*np.pi*1e-2)
         self.b_t = nn.Parameter(torch.rand(K, x1.shape[-1])*2*np.pi*1e-2)
         self.R = R
@@ -299,144 +299,6 @@ class FFCoupling(nn.Module):
         """
         y1, y2 = self._split(y)
         return self._cat(y1, self._s(y1, rev=True)*(y2 - self._t(y1)))
-
-
-class FFCoupling_scalefree(nn.Module):
-    """
-    An implementation of the scale-free invertible Fourier features transform, given by:
-                    f(x_1, x_2) = (x_1, x_2 + t(x_1))
-    where the functions s(x_1) and t(x_1) are both defined according to the Fourier features:
-                    t(x) = sum{ a_k cos(2*pi*k*x/R + b_k) } with k between 0 and K
-    where a_k are the coefficients of the Fourier features and b_k are the phases. R defines the natural scale of the
-    function and K is the number of Fourier components to be used.
-    """
-    def __init__(self, dim: int, K: int=5, R: int=10, reverse: bool=False):
-        """
-        Initializes the Fourier-features transform layer
-        :param dim: number of dimensions expected for inputs
-        :param K: number of Fourier coefficients to use
-        :param R: the maximum interval assumed in the data
-        :param reverse:
-        """
-        super().__init__()
-        self.reord = reverse
-        x1, x2 = self._split(torch.zeros(1, dim))
-        self.a_t = nn.Parameter(1e-2*torch.randn(K, x1.shape[-1], x2.shape[-1]))
-        self.b_t = nn.Parameter(torch.rand(K, x1.shape[-1])*2*np.pi*1e-2)
-        self.R = R
-
-    @staticmethod
-    def _ff(x: torch.Tensor, gamma: torch.Tensor, phi: torch.Tensor, R: float) -> torch.Tensor:
-        """
-        :param x: a torch tensor with shape [N, dim_in] the input to the transformation
-        :param gamma: a torch tensor with shape [K, dim_in, dim_out] of the Fourier coefficients
-        :param phi: a torch tensor with shape [K, dim_in] the phases of the transformation
-        :param R: a float depicting the range
-        :return: the transformed input x, a tensor with shape [N, dim_out]
-        """
-        freqs = torch.arange(0, gamma.shape[0], device=x.device)*2*np.pi/R
-        return torch.sum(torch.cos(freqs[None, :, None]*x[:, None] + phi[None])[..., None] * gamma[None], dim=(1, -2))
-
-    @staticmethod
-    def _df(x: torch.Tensor, gamma: torch.Tensor, phi: torch.Tensor, R: float) -> torch.Tensor:
-        """
-        :param x: a torch tensor with shape [N, dim_in] the input to the transformation
-        :param gamma: a torch tensor with shape [K, dim_in, dim_out] of the Fourier coefficients
-        :param phi: a torch tensor with shape [K, dim_in] the phases of the transformation
-        :param R: a float depicting the range
-        :return: the Jacobian of the FF function, with shape [N, dim_in, dim_out]
-        """
-        freqs = torch.arange(0, gamma.shape[0], device=x.device)*2*np.pi/R
-        sins = - freqs[None, :, None]*torch.sin(freqs[None, :, None]*x[:, None] + phi[None])  # [N, K, dim_in]
-        return torch.sum(sins[..., None]*gamma[None], dim=1)  # [N, dim_in, dim_out]
-
-    def _t(self, x1: torch.Tensor) -> torch.Tensor:
-        return self._ff(x1, self.a_t, self.b_t, self.R)
-
-    def _split(self, x: torch.Tensor) -> Tuple:
-        if self.reord:
-            x2, x1 = torch.chunk(x, 2, dim=1)
-        else:
-            x1, x2 = torch.chunk(x, 2, dim=1)
-        return x1, x2
-
-    def _cat(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
-        if self.reord: return torch.cat([x2, x1], dim=1)
-        else: return torch.cat([x1, x2], dim=1)
-
-    def freeze_scale(self, freeze: bool=True):
-        """
-        Freeze all parameters that impact log-determinant
-        :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
-        """
-        self.a_t.requires_grad = freeze
-        self.b_t.requires_grad = freeze
-
-    def rand_init(self, amnt: float):
-        """
-        Random initialization of the layer
-        :param amnt: a float with the strength of the initialization
-        """
-        self.b_t.data = np.pi*torch.rand_like(self.b_t)*amnt
-        self.a_t.data = torch.randn_like(self.a_t)*amnt/np.sum(self.a_t.shape)
-
-    def logdet(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Calculates the log-abs-determinant of the Jacobian evaluated at the point x
-        :param x: a torch tensor with shape [N, dim] where N is the number of points
-        :return: a torch tensor with shape [N,] of the log-abs-determinants of the Jacobian for each point x
-        """
-        return torch.zeros(x.shape[0], device=x.device)
-
-    def jacobian(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Calculates the Jacobian of the transform at points x
-        :param x: a torch tensor with shape [N, dim] where N is the number of points
-        :return: a torch tensor with shape [N, dim, dim] of the Jacobians evaluated at each point x
-        """
-        raise NotImplementedError
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        :param x: a torch tensor with shape [N, dim] where N is the number of points
-        :return: a torch tensor with shape [N, dim] of the transformed points
-        """
-        x1, x2 = self._split(x)
-        return self._cat(x1, x2 + self._t(x1))
-
-    def jvp_forward(self, x: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Calculates both the forward pass, as well as a Jacobian-vector-product (JVP) and the log-abs-determinant
-        :param x: a torch tensor with shape [N, dim] where N is the number of points
-        :param f: the vector on which to evaluate the JVP, a torch tensor with shape [N, dim] where N is the
-                  number of points
-        :return: the tuple (y, Jf, logdet) where:
-                    - y: a torch tensor with shape [N, dim], which are the transformed xs
-                    - Jf: a torch tensor with shape [N, dim], which are the JVP with f
-                    - logdet: a torch tensor with shape [N,] which are the log-abs-determinants evaluated at the
-                              points x
-        """
-        x1, x2 = self._split(x)
-        t = self._t(x1)
-        y = self._cat(x1, x2 + t)
-
-        f1, f2 = self._split(f)  # f1 shape: [N, dim_in], f2 shape: [N, dim_out]
-        dt = self._df(x1, self.a_t, self.b_t, self.R)  # [N, dim_in, dim_out]
-        Jf2 = (dt.transpose(-2, -1)@f1[..., None])[..., 0] + f2
-        Jf = self._cat(f1, Jf2)
-
-        logdet = torch.zeros(x.shape[0], device=x.device)
-
-        return y, Jf, logdet
-
-    def reverse(self, y: torch.Tensor) -> torch.Tensor:
-        """
-        Calculates the reverse transformation
-        :param y: a torch tensor with shape [N, dim]
-        :return: a torch tensor with shape [N, dim] which are the points after applying the reverse transformation
-        """
-        y1, y2 = self._split(y)
-        return self._cat(y1, y2 - self._t(y1))
 
 
 class AffineCoupling(nn.Module):
@@ -826,8 +688,7 @@ class NFCompose(nn.Module):
 class Diffeo(nn.Module):
 
     def __init__(self, dim: int, rank: int=2, n_layers: int=4, K: int=15, add_log: bool=False,
-                 MLP: bool=False, actnorm: bool=True, RFF: bool=False, scale_free: bool=False,
-                 affine_init: bool=False):
+                 MLP: bool=False, actnorm: bool=True, RFF: bool=False, affine_init: bool=False):
         """
         Initializes a diffeomorphism, which is a normalizing flow with interleaved Affine transformations and
         AffineCoupling layers
@@ -839,7 +700,6 @@ class Diffeo(nn.Module):
         :param MLP: if True, an AffineCoupling layer with an MLP will be used instead of the FFCoupling layer
         :param actnorm: whether the first layer is an invertible standardization of the data (a sort of preprocessing)
         :param RFF: if True, an AffineCoupling layer with an RFF will be used instead of the FFCoupling layer
-        :param scale_free: whether to use FFCoupling layers which are scale-free - only have a translation transform
         :param affine_init: whether to use a sort of initialization over the Affine transformation
         """
         super().__init__()
@@ -856,9 +716,6 @@ class Diffeo(nn.Module):
             elif RFF:
                 layers.append(RFFCoupling(dim=dim, K=K))
                 layers.append(RFFCoupling(dim=dim, K=K, reverse=True))
-            elif scale_free:
-                layers.append(FFCoupling_scalefree(dim=dim, K=K, R=10))
-                layers.append(FFCoupling_scalefree(dim=dim, K=K, R=10, reverse=True))
             else:
                 layers.append(FFCoupling(dim=dim, K=K, R=10))
                 layers.append(FFCoupling(dim=dim, K=K, R=10, reverse=True))
