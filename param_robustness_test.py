@@ -70,7 +70,7 @@ def classify_all(factor: float, n_points: int, job: int, lr: float, its: int, n_
         [.25, .5, .25]
     ]
 
-    a, omega, _ = archetypes[np.random.choice(1, 4)[0]]
+    a, omega, _ = archetypes[np.random.choice(4, 1)[0]]
     system = SO(a=a*factor, omega=omega*factor)
     parameters = system.parameters
 

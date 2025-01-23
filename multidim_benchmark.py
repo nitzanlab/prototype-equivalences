@@ -208,7 +208,7 @@ def compile_results(path: str, dim: int):
 @click.option('--save_h',   help='whether to save the model', type=int, default=0)
 @click.option('--rep',      help='repitition of the experiment (basically just adds a number to the start of the path', type=int, default=0)
 @click.option('--w_decay',  help='weight decay used', type=float, default=1e-3)
-@click.option('--rem_small', help='if 1, removes velocities with norms that are small compared to the observed noise (as preprocessing)', type=int, default=1)
+@click.option('--rem_small', help='if 1, removes velocities with norms that are small compared to the observed noise (as preprocessing)', type=int, default=0)
 def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_layers: int,
                  n_freqs: int, fr_rat: float, dim: int, time: float,
                  det_reg: float, cen_reg: float, proj_reg: float,
