@@ -492,10 +492,10 @@ class Affine(nn.Module):
                                         y = WW^Tx + exp[phi] x + mu
     where the learnable parameters are W (with shape [dim, rank]), phi (with shape [dim]), and mu (with shape [dim])
     """
-    def __init__(self, dim: int, rank: int=None, data_init: bool=False):
+    def __init__(self, dim: int, rank: int=None, data_init: bool=False, mu: torch.Tensor=None):
         super().__init__()
         if rank is None: rank = dim
-        self.mu = nn.Parameter(torch.randn(dim)*1e-3)
+        self.mu = nn.Parameter(torch.randn(dim)*1e-3) if mu is None else nn.Parameter(mu.clone())
         self.W = nn.Parameter(torch.randn(dim, rank)*1e-3)
         self.phi = nn.Parameter(torch.randn(dim)*1e-3)
         self.register_buffer('data_init', torch.ones(1) if data_init else torch.zeros(1))
@@ -688,7 +688,8 @@ class NFCompose(nn.Module):
 class Diffeo(nn.Module):
 
     def __init__(self, dim: int, rank: int=2, n_layers: int=4, K: int=15, add_log: bool=False,
-                 MLP: bool=False, actnorm: bool=True, RFF: bool=False, affine_init: bool=False):
+                 MLP: bool=False, actnorm: bool=True, RFF: bool=False, affine_init: bool=False,
+                 mu: torch.tensor=None):
         """
         Initializes a diffeomorphism, which is a normalizing flow with interleaved Affine transformations and
         AffineCoupling layers
@@ -707,7 +708,7 @@ class Diffeo(nn.Module):
         layers = []
         if add_log: layers.append(LogTransf())
         if actnorm: layers.append(ActNorm(dim))
-        layers.append(Affine(dim=dim, rank=dim, data_init=affine_init))
+        layers.append(Affine(dim=dim, rank=dim, data_init=affine_init, mu=mu))
         for i in range(n_layers):
             layers.append(Affine(dim=dim, rank=rank))
             if MLP:

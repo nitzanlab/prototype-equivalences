@@ -36,8 +36,15 @@ class PhaseSpace:
         """
         raise NotImplementedError
 
+    @staticmethod
+    def random_cycle_params() -> dict:
+        """
+        :return: a dictionary of parameters to the system for oscillatory behavior
+        """
+        raise NotImplementedError
+
     def trajectories(self, x: torch.Tensor, T: float, step: float=1e-2, euler: bool=False) -> torch.Tensor:
-        x = torch.clamp(x, self.position_lims[0], self.position_lims[1])
+        # x = torch.clamp(x, self.position_lims[0], self.position_lims[1])
         return simulate_trajectory(self.forward, x, T=T, step=step, euler=euler)
 
     def rand_on_traj(self, x: torch.Tensor, T: float, step: float=1e-2, euler: bool=False,
@@ -48,6 +55,13 @@ class PhaseSpace:
         for i in range(x.shape[0]):
             pts.append(traj[np.random.choice(traj.shape[0], 1)[0], i])
         return torch.stack(pts)
+
+    def random_x(self, N: int, dim: int=2):
+        """
+        :param N: number of random positions to sample from the system's range
+        :return: a torch tensor with shape [N, dim]
+        """
+        return torch.rand(N, dim)*(self.position_lims[1] - self.position_lims[0]) + self.position_lims[0]
 
 
 class Augmentation:
@@ -99,6 +113,15 @@ class SO(PhaseSpace):
         self.osc = get_oscillator(a=self.parameters['a'],
                                   omega=self.parameters['omega'],
                                   decay=self.parameters['decay'])
+
+    @staticmethod
+    def random_cycle_params() -> dict:
+        """
+        :return: a dictionary of parameters to the system for oscillatory behavior
+        """
+        omega = np.random.rand()*(SO.param_ranges['omega'][1]-SO.param_ranges['omega'][0])+SO.param_ranges['omega'][0]
+        a = np.random.rand()*SO.param_ranges['a'][1]
+        return {'a': a, 'omega': omega}
 
     @torch.no_grad()
     def forward(self, t, x):
@@ -162,14 +185,24 @@ class Repressilator(PhaseSpace):
         self.a0 = alpha0
         super().__init__({'alpha': alpha, 'beta': beta})
 
-    def dist_from_bifur(self):
+    @staticmethod
+    def random_cycle_params() -> dict:
         """
-        Checks how far the system is from the Hopf bifurcation
-        :return: if smaller than 0, then the dynamics are a node attractor, otherwise they are cyclic
+        :return: a dictionary of parameters to the system for oscillatory behavior
         """
+        beta_range = Repressilator.param_ranges['beta']
+        alpha_range = Repressilator.param_ranges['alpha']
+        beta = np.random.rand()*(beta_range[1] - beta_range[0]) + beta_range[0]
+        alpha = None
+        while alpha is None:
+            a = np.random.rand()*(alpha_range[1] - alpha_range[0]) + alpha_range[0]
+            if Repressilator._bifur_dist(alpha=a, beta=beta) > 0: alpha = a
+        return {'alpha': alpha, 'beta': beta}
+
+    @staticmethod
+    def _bifur_dist(alpha, beta, a0=.2, n=2.):
         from scipy.optimize import fsolve
-        a, b = self.parameters['alpha'], self.parameters['beta']
-        a0, n = self.a0, self.n
+        a, b = alpha, beta
 
         def equation(x, a, a0, n):
             return a / (1 + x ** n) + a0 - x
@@ -184,6 +217,13 @@ class Repressilator(PhaseSpace):
 
         # check condition for stability
         return -(((b + 1) ** 2 / b) - 3 * xi ** 2 / (4 + 2 * xi))[0]
+
+    def dist_from_bifur(self):
+        """
+        Checks how far the system is from the Hopf bifurcation
+        :return: if smaller than 0, then the dynamics are a node attractor, otherwise they are cyclic
+        """
+        return self._bifur_dist(alpha=self.parameters['alpha'], beta=self.parameters['beta'], a0=self.a0, n=self.n)
 
     @torch.no_grad()
     def forward(self, t: float, z: torch.Tensor) -> torch.Tensor:
@@ -273,10 +313,22 @@ class BZreaction(PhaseSpace):
         'b': r'$b$',
     }
 
-    position_lims = [0, 20]
+    position_lims = [0, 30]
 
     def __init__(self, a: float=None, b: float=None, decay: float=None):
         super().__init__({'a': a, 'b': b, 'decay': decay})
+
+    @staticmethod
+    def random_cycle_params() -> dict:
+        """
+        :return: a dictionary of parameters to the system for oscillatory behavior
+        """
+        a_range = BZreaction.param_ranges['a']
+        b_range = BZreaction.param_ranges['b']
+        a = np.random.rand() * (a_range[1] - a_range[0]) + a_range[0]
+        max_b = 3*a/5 - 25/a
+        b = np.random.rand() * (max_b - b_range[0]) + b_range[0]
+        return {'a': a, 'b': b}
 
     def forward(self, t, z):
         a, b, decay = self.parameters['a'], self.parameters['b'], self.parameters['decay']
@@ -321,6 +373,18 @@ class Selkov(PhaseSpace):
 
     def __init__(self, a: float=None, b: float=None, decay: float=None):
         super().__init__({'a': a, 'b': b, 'decay': decay})
+
+    @staticmethod
+    def random_cycle_params() -> dict:
+        """
+        :return: a dictionary of parameters to the system for oscillatory behavior
+        """
+        a_range = Selkov.param_ranges['a']
+        a = np.random.rand() * (a_range[1] - a_range[0]) + a_range[0]
+        f_min = np.sqrt(1 / 2 * (1 - 2 * a - np.sqrt(1 - 8 * a)))
+        f_max = np.sqrt(1 / 2 * (1 - 2 * a + np.sqrt(1 - 8 * a)))
+        b = np.random.rand() * (f_max - f_min) + f_min
+        return {'a': a, 'b': b}
 
     def forward(self, t, z):
         a, b, decay = self.parameters['a'], self.parameters['b'], self.parameters['decay']
@@ -475,6 +539,14 @@ class VanDerPol(PhaseSpace):
     def __init__(self, mu: float=None, decay: float=None):
         super().__init__({'mu': mu, 'decay': decay})
 
+    @staticmethod
+    def random_cycle_params() -> dict:
+        """
+        :return: a dictionary of parameters to the system for oscillatory behavior
+        """
+        mu = VanDerPol.param_ranges['mu'][1]*np.random.rand()
+        return {'mu': mu}
+
     def forward(self, t, z, **kwargs):
         x = z[..., 0]
         y = z[..., 1]
@@ -561,6 +633,14 @@ class LienardPoly(Lienard):
         self.g = lambda x: a * x + b * x ** 3
         self.f = lambda x: c + d * x ** 2
 
+    @staticmethod
+    def random_cycle_params() -> dict:
+        """
+        :return: a dictionary of parameters to the system for oscillatory behavior
+        """
+        c = LienardPoly.param_ranges['c'][0] * np.random.rand()
+        return {'c': c}
+
     def dist_from_bifur(self):
         return -self.parameters['c']
 
@@ -596,6 +676,14 @@ class LienardSigmoid(Lienard):
 
         self.g = lambda x: 1 / (1 + torch.exp(-a * x)) - 0.5
         self.f = lambda x: b + c * x ** 2
+
+    @staticmethod
+    def random_cycle_params() -> dict:
+        """
+        :return: a dictionary of parameters to the system for oscillatory behavior
+        """
+        b = LienardSigmoid.param_ranges['b'][0] * np.random.rand()
+        return {'b': b}
 
     def dist_from_bifur(self):
         return -self.parameters['b']

@@ -161,6 +161,231 @@ def fit_DFORM(H: nn.Module, x: torch.Tensor, xdot: torch.Tensor, g: Callable, it
     return H, loss, ldet, score
 
 
+def fit_woutliers(H: nn.Module, x: torch.Tensor, xdot: torch.Tensor, g: Callable, outlier_rate: float, its: int=300,
+                  lr: float=5e-3, verbose=False, freeze_frac: float=.0, det_reg: float=.0, center_reg: float=.0,
+                  weight_decay: float=1e-3, proj_reg: float=None, noise: float=0.):
+    """
+    Fits the supplied observations to the given archetype g using a variant of the smooth-equivalence loss defined in
+    DFORM under the diffeomorophism H, but under the assumption that a fraction of the data is outliers
+    :param H: the diffeomorphism to be trained, usually an NFDiffeo.Diffeo object
+    :param x: the positions of the observations, a torch tensor with shape [N, dim]
+    :param xdot: the vectors associated with the above positions, a torch tensor with shape [N, dim]
+    :param g: the archetype; a Callable that gets a position y as input and returns the velocity ydot at that position
+    :param outlier_rate: the fraction of points that are expected to be outliers
+    :param its: number of GD iterations
+    :param lr: the learning rate
+    :param verbose: a boolean indicating whether progress should be printed (True) or not (False)
+    :param freeze_frac: fraction of iterations to freeze non-linear transformations in H (between 0 and 1)
+    :param det_reg: how much regularization should be added on the absolute value of the determinant
+    :param center_reg: a regularization coefficient that penalizes transformations whose stationary point is very far
+                       from the mean of the data
+    :param weight_decay: amount of weight decay to use during training
+    :param proj_reg: initial strength of the projection regularization used during fitting; this value is in log-scale,
+                     so for no regularization use proj_reg=None (proj_reg=0 is like a regularization strength of 1)
+    :param noise: the standard deviation of the noise assumed to exist in the vector data, used for weighting loss
+    :return: - the fitted network, H
+             - the average loss over all observed vectors
+             - the average log-determinant over all observed vectors
+             - the score, which is the loss of the first two dimensions of the archetype, of the observed vectors
+             - the indices of the points that were designated as outliers
+    """
+    # ========================== initialize things before fitting ======================================================
+    if freeze_frac > 0: H.freeze_scale(True)  # freeze weights if needed
+
+    if x.shape[-1]==2: proj_reg = None
+
+    if proj_reg is not None:
+        proj_reg = torch.ones(1, device=x.device)*proj_reg
+        proj_reg.requires_grad = True
+        optim = Adam(list(H.parameters()) + [proj_reg], weight_decay=weight_decay)
+    else:
+        optim = Adam(list(H.parameters()), lr=lr, weight_decay=weight_decay)
+
+    center = torch.mean(x, dim=0, keepdim=True)
+
+    # ==================================================================================================================
+
+    unfrozen = False
+    pbar = tqdm(range(its), disable=not verbose)
+    # fitting process
+    for i in pbar:
+        optim.zero_grad()
+
+        # if enough iterations have passed, unfreeze weights
+        if freeze_frac > 0 and i > its*freeze_frac and not unfrozen:
+            H.freeze_scale(False)  # unfreeze weights to do with determinant
+            if proj_reg is not None: optim = Adam(list(H.parameters()) + [proj_reg], weight_decay=weight_decay)
+            else: optim = Adam(H.parameters(), lr=lr, weight_decay=weight_decay)
+            unfrozen = True
+
+        y, jvp, ldet = H.jvp_forward(x, xdot)   # calculate transformed inputs
+        ydot = g(y)  # velocities of vectors of archetypes
+
+        err = equiv_err(xdot, jvp, ydot, soequiv=True, noise=noise)  # calculate the error according to the equivalence
+
+        # find outliers, but only after some of the fitting process
+        weights = torch.ones_like(err)
+        with torch.no_grad():
+            srt = torch.argsort(torch.mean(err.detach(), dim=1), descending=True)
+            inds = srt[:int(outlier_rate*len(srt))]
+            weights[inds] = 0
+        mseloss = torch.mean(err*weights)
+
+        dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
+        closs = torch.mean((center-H.reverse(torch.zeros_like(center)))**2)  # adds loss for transformation of center (regularization)
+        ploss = proj_loss(x, y, H, proj_reg)  # adds loss for projection
+        loss = mseloss + det_reg*dloss + center_reg*closs + ploss  # put full loss together
+
+        loss.backward()
+        nn.utils.clip_grad_norm_(H.parameters(), 10)  # clip gradients for stable training
+        optim.step()
+
+        loss = loss.item()
+        pbar.set_postfix_str(f'loss={loss:.4f}'+
+                             (f'; projvar={torch.exp(proj_reg).item():.3f}' if proj_reg is not None else ''))
+
+    # ========================== calculate final losses for everything =================================================
+    H.requires_grad = False
+    with torch.no_grad():
+        y, jvp, ldet = H.jvp_forward(x.clone(), xdot.clone())
+        ploss = proj_loss(x, y, H, proj_reg).item() if proj_reg is not None else 0
+
+    ydot = g(y)
+    err = equiv_err(xdot, jvp, ydot, noise=noise)
+    score = torch.mean(err[:, :2]).item()
+    loss = torch.mean(err).item() + ploss
+    ldet = torch.mean(ldet.detach()).item()
+
+    # find outliers
+    with torch.no_grad():
+        srt = torch.argsort(torch.mean(err.detach(), dim=1), descending=True)
+        outlier_inds = srt[:int(outlier_rate * len(srt))]
+    # ==================================================================================================================
+
+    return H, loss, ldet, score, outlier_inds
+
+
+def fit_multisystem(Hs: list, x: torch.Tensor, xdot: torch.Tensor, gs: list, its: int=300,
+                    lr: float=5e-3, verbose=False, freeze_frac: float=.0, det_reg: float=.0, center_reg: float=.0,
+                    weight_decay: float=1e-3, proj_reg: float=None, noise: float=0., beta: float=1.):
+    """
+    Fits the supplied observations to the given archetype g using a variant of the smooth-equivalence loss defined in
+    DFORM under the diffeomorophism H, but assuming there are multiple systems in the field of view
+    :param Hs: a list of the diffeomorphisms to be trained, usually NFDiffeo.Diffeo objects
+    :param x: the positions of the observations, a torch tensor with shape [N, dim]
+    :param xdot: the vectors associated with the above positions, a torch tensor with shape [N, dim]
+    :param gs: list of archetypes; Callables that get a position y as input and return the velocity ydot at that position
+    :param its: number of GD iterations
+    :param lr: the learning rate
+    :param verbose: a boolean indicating whether progress should be printed (True) or not (False)
+    :param freeze_frac: fraction of iterations to freeze non-linear transformations in H (between 0 and 1)
+    :param det_reg: how much regularization should be added on the absolute value of the determinant
+    :param center_reg: a regularization coefficient that penalizes transformations whose stationary point is very far
+                       from the mean of the data
+    :param weight_decay: amount of weight decay to use during training
+    :param proj_reg: initial strength of the projection regularization used during fitting; this value is in log-scale,
+                     so for no regularization use proj_reg=None (proj_reg=0 is like a regularization strength of 1)
+    :param noise: the standard deviation of the noise assumed to exist in the vector data, used for weighting loss
+    :param beta: the inverse of the temperature used to define the probabilities to each archetype
+    :return: - the fitted network, H
+             - the average loss over all observed vectors
+             - the average log-determinant over all observed vectors
+             - the score, which is the loss of the first two dimensions of the archetype, of the observed vectors
+             - the indices of the points that were designated as outliers
+    """
+    # ========================== initialize things before fitting ======================================================
+    if freeze_frac > 0:
+        for H in Hs: H.freeze_scale(True)  # freeze weights if needed
+
+    if x.shape[-1]==2: proj_reg = None
+
+    param_list = []
+    for H in Hs: param_list += list(H.parameters())
+
+    if proj_reg is not None:
+        proj_reg = torch.ones(1, device=x.device)*proj_reg
+        proj_reg.requires_grad = True
+        optim = Adam(param_list + [proj_reg], weight_decay=weight_decay)
+    else:
+        optim = Adam(param_list, lr=lr, weight_decay=weight_decay)
+
+    center = torch.mean(x, dim=0, keepdim=True)
+
+    # ==================================================================================================================
+
+    unfrozen = False
+    pbar = tqdm(range(its), disable=not verbose)
+    # fitting process
+    for i in pbar:
+        optim.zero_grad()
+
+        # if enough iterations have passed, unfreeze weights
+        if freeze_frac > 0 and i > its*freeze_frac and not unfrozen:
+            for H in Hs: H.freeze_scale(False)  # unfreeze weights to do with determinant
+            param_list = []
+            for H in Hs: param_list += list(H.parameters())
+            if proj_reg is not None: optim = Adam(param_list + [proj_reg], weight_decay=weight_decay)
+            else: optim = Adam(param_list, lr=lr, weight_decay=weight_decay)
+            unfrozen = True
+
+        errs = []
+        dlosses = []
+        closses = []
+        plosses = []
+        for g, H in zip(gs, Hs):
+            y, jvp, ldet = H.jvp_forward(x, xdot)  # calculate transformed inputs
+            ydot = g(y)  # velocities of vectors of archetypes
+            # calculate errors according to all archetypes
+            errs.append(torch.mean(equiv_err(xdot, jvp, ydot, soequiv=True, noise=noise), dim=1))
+            dlosses.append(torch.abs(ldet))
+            closses.append(torch.mean((center - H.reverse(torch.zeros_like(center))) ** 2))
+            plosses.append(proj_loss(x, y, H, proj_reg))
+        errs = torch.stack(errs)
+        dlosses = torch.stack(dlosses)
+        closses = torch.mean(torch.stack(closses))
+        if proj_reg is None: plosses = torch.zeros_like(closses)
+        else: plosses = torch.stack(plosses)
+
+        with torch.no_grad():
+            probs = torch.exp(-beta*errs - torch.logsumexp(-beta*errs, dim=0, keepdim=True)).detach()
+
+        mseloss = torch.mean(torch.sum(probs*errs, dim=0))
+        loss = mseloss + \
+               det_reg*torch.sum(dlosses*probs) + \
+               center_reg*closses + \
+               torch.sum(plosses*probs)  # put full loss together
+
+        loss.backward()
+        for H in Hs: nn.utils.clip_grad_norm_(H.parameters(), 10)  # clip gradients for stable training
+        optim.step()
+
+        loss = loss.item()
+        pbar.set_postfix_str(f'loss={loss:.4f}'+
+                             (f'; projvar={torch.exp(proj_reg).item():.3f}' if proj_reg is not None else ''))
+
+    # ========================== calculate final losses for everything =================================================
+    for H in Hs: H.requires_grad = False
+
+    with torch.no_grad():
+        errs = []
+        plosses = []
+        for g, H in zip(gs, Hs):
+            y, jvp, ldet = H.jvp_forward(x, xdot)  # calculate transformed inputs
+            ydot = g(y)  # velocities of vectors of archetypes
+            # calculate errors according to all archetypes
+            errs.append(equiv_err(xdot, jvp, ydot, soequiv=True, noise=noise))
+            plosses.append(proj_loss(x, y, H, proj_reg))  # adds loss for projection
+        errs = torch.stack(errs)
+        if proj_reg is None: plosses = torch.zeros_like(errs)
+        else: plosses = torch.stack(plosses)
+
+    score = torch.mean(torch.sum(errs[:, :, :2]*probs[..., None], dim=0)).item()
+    loss = torch.mean(torch.sum(errs*probs[..., None], dim=0)).item()
+    # ==================================================================================================================
+
+    return Hs, loss, score
+
+
 def fit_all_archetypes(x: torch.Tensor, xdot: torch.Tensor, archetypes: list=_default_archetypes,
                        diffeo_args: dict=dict(), **fitting_args: dict) -> dict:
     """

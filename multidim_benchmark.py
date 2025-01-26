@@ -9,6 +9,8 @@ from Hutils import get_oscillator, simulate_trajectory, cycle_error
 from systems import LinearAug, QuadAug, DiffeoAug, ComposeAug, PhaseSpace, Augmentation
 from systems import SO, Selkov, BZreaction, Repressilator, VanDerPol, LienardSigmoid, LienardPoly, SubcriticalHopf, \
     SupercriticalHopf
+import matplotlib
+matplotlib.use('pgf')
 from matplotlib import pyplot as plt
 import sys, logging
 plt.rcParams.update({
@@ -335,10 +337,9 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
         subplot += 1
         if save_h > 0: torch.save(H, path + f'{job}_a={a:.2f}_om={omega:.2f}.pth')
     plt.tight_layout()
-    plt.savefig(path + f'{job}_projections.png')
     with open(path + f'{job}.pkl', 'wb') as f: pickle.dump(res_dict, f)
-
     compile_results(path, dim)
+    plt.savefig(path + f'{job}_projections.png')
 
 
 if __name__ == '__main__':
