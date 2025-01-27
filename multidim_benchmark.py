@@ -171,7 +171,8 @@ def compile_results(path: str, dim: int):
     full_dict = {
         'archetypes': archetypes
     }
-    fields = ['losses', 'logdets', '2Dlosses', 'data_mean', 'data_std', 'params']
+    fields = ['losses', 'logdets', '2Dlosses', 'data_mean', 'data_std', 'params', 'cycle-errors']
+
     for field in fields: full_dict[field] = []
     for i in range(1000):
         try:

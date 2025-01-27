@@ -161,22 +161,32 @@ class FFCoupling(nn.Module):
     where a_k are the coefficients of the Fourier features and b_k are the phases. R defines the natural scale of the
     function and K is the number of Fourier components to be used.
     """
-    def __init__(self, dim: int, K: int=32, R: int=10, reverse: bool=False):
+    def __init__(self, dim: int, K: int=32, R: int=10, reverse: bool=False, scale_free: bool=False, split_dims=None):
         """
         Initializes the Fourier-features transform layer
         :param dim: number of dimensions expected for inputs
         :param K: number of Fourier coefficients to use
         :param R: the maximum interval assumed in the data
+        :param scale_free: return a scaling-free version of the FFCoupling
         :param reverse:
         """
         super().__init__()
         self.reord = reverse
+        self.split_dims = split_dims
         x1, x2 = self._split(torch.zeros(1, dim))
-        self.a_s = nn.Parameter(1e-3*torch.randn(K, x1.shape[-1], x2.shape[-1]))
         self.a_t = nn.Parameter(1e-3*torch.randn(K, x1.shape[-1], x2.shape[-1]))
-        self.b_s = nn.Parameter(torch.rand(K, x1.shape[-1])*2*np.pi*1e-2)
         self.b_t = nn.Parameter(torch.rand(K, x1.shape[-1])*2*np.pi*1e-2)
+        self.scale_free = scale_free
         self.R = R
+
+        if self.scale_free:
+            self.a_s = nn.Parameter(torch.zeros(K, x1.shape[-1], x2.shape[-1]))
+            self.b_s = nn.Parameter(torch.zeros(K, x1.shape[-1]))
+            self.a_s.requires_grad = False
+            self.b_s.requires_grad = False
+        else:
+            self.a_s = nn.Parameter(1e-3*torch.randn(K, x1.shape[-1], x2.shape[-1]))
+            self.b_s = nn.Parameter(torch.rand(K, x1.shape[-1])*2*np.pi*1e-2)
 
     @staticmethod
     def _ff(x: torch.Tensor, gamma: torch.Tensor, phi: torch.Tensor, R: float) -> torch.Tensor:
@@ -210,10 +220,15 @@ class FFCoupling(nn.Module):
         return self._ff(x1, self.a_t, self.b_t, self.R)
 
     def _split(self, x: torch.Tensor) -> Tuple:
-        if self.reord:
-            x2, x1 = torch.chunk(x, 2, dim=1)
+        if self.split_dims is None:
+            if self.reord:
+                x2, x1 = torch.chunk(x, 2, dim=1)
+            else:
+                x1, x2 = torch.chunk(x, 2, dim=1)
         else:
-            x1, x2 = torch.chunk(x, 2, dim=1)
+            outinds = [i for i in range(x.shape[-1]) if i not in self.split_dims]
+            x1 = x[:, self.split_dims]
+            x2 = x[:, outinds]
         return x1, x2
 
     def _cat(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
@@ -229,6 +244,10 @@ class FFCoupling(nn.Module):
         self.b_s.requires_grad = freeze
         self.a_t.requires_grad = freeze
         self.b_t.requires_grad = freeze
+
+        if self.scale_free:
+            self.a_s.requires_grad = False
+            self.b_s.requires_grad = False
 
     def rand_init(self, amnt: float):
         """
@@ -591,6 +610,119 @@ class LogTransf(nn.Module):
         return torch.exp(y)-self.prec
 
 
+class PolarTransf(nn.Module):
+
+    def __init__(self, precision: float=1e-6):
+        super().__init__()
+        self.precision = precision
+
+    def freeze_scale(self, freeze: bool = True):
+        """
+        Freeze all parameters that impact log-determinant
+        :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
+        """
+        pass
+
+    def rand_init(self, amnt: float):
+        """
+        Random initialization of the layer
+        :param amnt: a float with the strength of the initialization
+        """
+        pass
+
+    def _cart2polar(self, x):
+        comp = x[:, :2]
+        uncomp = x[:, 2:]
+        r = torch.sum(x**2, dim=1) + self.precision
+        theta = torch.arctan2(comp[:, 1], comp[:, 0])
+        return torch.cat([r[:, None], theta[:, None], uncomp], dim=-1)
+
+    def logdet(self, x: torch.Tensor) -> torch.Tensor:
+        y = self._cart2polar(x)
+        return .5*torch.log(y[:, 0])
+
+    def jacobian(self, x: torch.Tensor) -> torch.Tensor:
+        pass
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self._cart2polar(x)
+
+    def jvp_forward(self, x: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        y = self._cart2polar(x)
+
+        fr = f[:, 0]
+        fthet = f[:, 1]
+        felse = f[:, 2:]
+        # dr/dx = 2x
+        jvp1 = 2*x[:, 0]*fr + 2*x[:, 1]*fthet
+        # dth/dx = - y/r
+        # dth/dy = x/r
+        r = torch.sqrt(y[:, 0])
+        jvp2 = -x[:, 1]*fr/r + x[:, 0]*fthet/r
+        jvp = torch.cat([jvp1[:, None], jvp2[:, None], felse], dim=-1)
+        return y, jvp, torch.log(y[:, 0])
+
+    def reverse(self, y: torch.Tensor) -> torch.Tensor:
+        r = torch.sqrt(torch.clamp(y[:, 0] - self.precision, 0))[:, None]
+        theta = y[:, 1][:, None]
+        oth = y[:, 2:]
+        return torch.cat([r*torch.cos(theta), r*torch.sin(theta), oth], dim=-1)
+
+
+class RevPolarTransf(nn.Module):
+
+    def __init__(self, precision: float=1e-6):
+        super().__init__()
+        self.precision = precision
+
+    def freeze_scale(self, freeze: bool = True):
+        """
+        Freeze all parameters that impact log-determinant
+        :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
+        """
+        pass
+
+    def rand_init(self, amnt: float):
+        """
+        Random initialization of the layer
+        :param amnt: a float with the strength of the initialization
+        """
+        pass
+
+    def logdet(self, x: torch.Tensor) -> torch.Tensor:
+        return -.5*torch.log(x[:, 0])
+
+    def jacobian(self, x: torch.Tensor) -> torch.Tensor:
+        pass
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        r = torch.sqrt(torch.clamp(x[:, 0] - self.precision, 0))[:, None]
+        theta = x[:, 1][:, None]
+        oth = x[:, 2:]
+        return torch.cat([r * torch.cos(theta), r * torch.sin(theta), oth], dim=-1)
+
+    def jvp_forward(self, x: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        y = self.forward(x)
+
+        r = torch.sqrt(torch.clamp(x[:, 0] - self.precision, 0))[:, None]
+        theta = x[:, 1][:, None]
+
+        fx = f[:, 0][:, None]
+        fy = f[:, 1][:, None]
+        felse = f[:, 2:]
+        jvp1 = torch.cos(theta)*fx - r*torch.sin(theta)*fy
+        jvp2 = torch.sin(theta)*fx + r*torch.cos(theta)*fy
+        jvp = torch.cat([jvp1, jvp2, felse], dim=-1)
+        return y, jvp, -torch.log(r[:, 0])
+
+    def reverse(self, y: torch.Tensor) -> torch.Tensor:
+        comp = y[:, :2]
+        uncomp = y[:, 2:]
+        r = torch.sum(y ** 2, dim=1) + self.precision
+        theta = torch.arctan2(comp[:, 1], comp[:, 0])
+        return torch.cat([r[:, None], theta[:, None], uncomp], dim=-1)
+
+
 class ActNorm(nn.Module):
 
     def __init__(self, dim: int):
@@ -689,7 +821,7 @@ class Diffeo(nn.Module):
 
     def __init__(self, dim: int, rank: int=2, n_layers: int=4, K: int=15, add_log: bool=False,
                  MLP: bool=False, actnorm: bool=True, RFF: bool=False, affine_init: bool=False,
-                 mu: torch.tensor=None):
+                 mu: torch.tensor=None, scale_free: bool=False, polar: bool=False):
         """
         Initializes a diffeomorphism, which is a normalizing flow with interleaved Affine transformations and
         AffineCoupling layers
@@ -702,6 +834,7 @@ class Diffeo(nn.Module):
         :param actnorm: whether the first layer is an invertible standardization of the data (a sort of preprocessing)
         :param RFF: if True, an AffineCoupling layer with an RFF will be used instead of the FFCoupling layer
         :param affine_init: whether to use a sort of initialization over the Affine transformation
+        :param scale_free: whether to use a scale-free version of the couplings
         """
         super().__init__()
 
@@ -718,8 +851,13 @@ class Diffeo(nn.Module):
                 layers.append(RFFCoupling(dim=dim, K=K))
                 layers.append(RFFCoupling(dim=dim, K=K, reverse=True))
             else:
-                layers.append(FFCoupling(dim=dim, K=K, R=10))
-                layers.append(FFCoupling(dim=dim, K=K, R=10, reverse=True))
+                layers.append(FFCoupling(dim=dim, K=K, R=10, scale_free=scale_free))
+                layers.append(FFCoupling(dim=dim, K=K, R=10, reverse=True, scale_free=scale_free))
+
+        if polar:
+            layers.append(PolarTransf())
+            layers.append(FFCoupling(dim=dim, K=2, R=1000, split_dims=[0]))
+            layers.append(RevPolarTransf())
 
         self.transf = NFCompose(*layers)
 
