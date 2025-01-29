@@ -240,10 +240,10 @@ class FFCoupling(nn.Module):
         Freeze all parameters that impact log-determinant
         :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
         """
-        self.a_s.requires_grad = freeze
-        self.b_s.requires_grad = freeze
-        self.a_t.requires_grad = freeze
-        self.b_t.requires_grad = freeze
+        self.a_s.requires_grad = not freeze
+        self.b_s.requires_grad = not freeze
+        self.a_t.requires_grad = not freeze
+        self.b_t.requires_grad = not freeze
 
         if self.scale_free:
             self.a_s.requires_grad = False

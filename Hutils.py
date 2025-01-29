@@ -117,7 +117,7 @@ def cycle_error(H: Diffeo, x: torch.Tensor, a: float) -> float:
     """
     y = H.reverse(project_onto_attractor(a, H(x)))
     err = (y-x)**2
-    norm = torch.std(x)
+    norm = torch.var(x)
     return torch.mean(err/norm).item()
 
 
