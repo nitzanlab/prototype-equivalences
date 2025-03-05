@@ -3,15 +3,10 @@ from NFDiffeo import Diffeo
 import numpy as np
 import torch
 import pickle
-import click
 from pathlib import Path
-from Hutils import get_oscillator, simulate_trajectory
-from multidim_benchmark import traj_in_vecs
+from Hutils import get_oscillator
 from systems import SO
-import matplotlib
 from tqdm import tqdm
-matplotlib.use('pgf')
-
 from matplotlib import pyplot as plt
 
 plt.rcParams.update({
@@ -108,7 +103,6 @@ def plot_cycles(x: torch.Tensor, xdot: torch.Tensor, true_cycle: torch.Tensor, f
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device = 'cpu'
 root_path = 'results/invariant_set/'
 
 all_results = {}
