@@ -21,7 +21,7 @@ matplotlib
 
 ## Basic Usage
 
-SPE allows for the characterization of observations from a vector field, the set $D=\left\{(x_i,\dot{x}_i)\right\}_{i=1}^N$  comprised of positions ($x_i$) and velocities ($\dot{x}_i$). To do so, the data is matched to a prototype, which is a simple vector field governed by a known equation $\dot{y}=g(y)$. This matching is carried out using a diffeomorphism (an invertible and differentiable function) parameterized with a neural network, specifically a normalizing flow (NF).
+SPE allows for the characterization of observations from a vector field, the set $D=\{(x\_i,\dot{x}\_i)\}\_{i=1}^N$  comprised of positions ($x_i$) and velocities ($\dot{x}_i$). To do so, the data is matched to a prototype, which is a simple vector field governed by a known equation $\dot{y}=g(y)$. This matching is carried out using a diffeomorphism (an invertible and differentiable function) parameterized with a neural network, specifically a normalizing flow (NF).
 
 This codebase has two main components: 
 1. An implementation of NFs that are expressive but lightweight - the `Diffeo` class from [`NFDiffeo.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/NFDiffeo.py)
@@ -34,13 +34,14 @@ An example usage of SPE for estimating limit cycles in 2D and higher-dimensional
 ### Prototype Definition
 
 To use SPE, a prototype has to be defined. In our experiments, we used damped simple oscillators (SO) as prototypes. These are governed by the following equations (in polar coordinates):
+
 	 $\dot{r}=r(a-r)^2$
+
 	 $\dot{\theta}=\omega$
+
 where $a$ and $\omega$ are scalar parameters. When $a<0$, this system has a (single) node attractor at $x=y=0$, while $a>0$ has a limit cycle which is a circle with radius $\sqrt{a}$  about the origin. Positive $\omega$ implies counter-clockwise movement. Using this simple system as a prototype is optimal, as it allows us to learn a mapping from the observed data to some simple behavior. In all of our implementations, prototypes are considered as `Callable` objects. The SO prototype can be instantiated using the `get_oscillator` function from [`Hutils.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/Hutils.py).
 
-To fit the diffeomorphism, a loss designed to enforce smooth equivalences is used:
-		$L_\text{E}(H, g)=\frac{1}{N}\sum_{i=1}^N \left\|\frac{\partial_{x_i} H(x_i)\dot{x}_i}{\|\partial_{x_i} H(x_i)\dot{x}_i\|}-\frac{g\left(H(x_i)\right)}{\| g\left(H(x_i)\right)\|}\right\|^2$
-where $H(\cdot)$ is the diffeomorphism and $g(\cdot)$ are the governing equations of the prototype. The `fit_prototype` function from [`fit_SPE.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/fit_SPE.py) does exactly this, using gradient descent.
+To fit the diffeomorphism, a loss designed to enforce smooth equivalences is used. The `fit_prototype` function from [`fit_SPE.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/fit_SPE.py) does exactly this, using gradient descent.
 
 For classification, multiple prototypes need to be fitted. The wrapper function `fit_all_prototypes` from [`fit_SPE.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/fit_SPE.py) is designed to handle this natively. 
 
