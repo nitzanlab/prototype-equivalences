@@ -42,10 +42,10 @@ def proj_loss(x, y, H, proj_var):
     return torch.exp(proj_var)*torch.mean((H.reverse(yproj) - x)**2) - 2*projLL/(x.shape[0]*x.shape[1])
 
 
-def fit_DFORM(H: nn.Module, x: torch.Tensor, xdot: torch.Tensor, g: Callable, its: int=300, lr: float=5e-3,
-              verbose=False, freeze_frac: float=.0, det_reg: float=.0, center_reg: float=.0, weight_decay: float=1e-3,
-              proj_reg: float=None, soequiv: bool=True, dim2_weight: float=None, test_fr: float=0,
-              noise: float=0.):
+def fit_prototype(H: nn.Module, x: torch.Tensor, xdot: torch.Tensor, g: Callable, its: int=300, lr: float=5e-3,
+                  verbose=False, freeze_frac: float=.0, det_reg: float=.0, center_reg: float=.0, weight_decay: float=1e-3,
+                  proj_reg: float=None, soequiv: bool=True, dim2_weight: float=None, test_fr: float=0,
+                  noise: float=0.):
     """
     Fits the supplied observations to the given archetype g using a variant of the smooth-equivalence loss defined in
     DFORM under the diffeomorophism H
@@ -157,7 +157,7 @@ def fit_DFORM(H: nn.Module, x: torch.Tensor, xdot: torch.Tensor, g: Callable, it
     return H, loss, ldet, score
 
 
-def fit_all_archetypes(x: torch.Tensor, xdot: torch.Tensor, archetypes: list=_default_archetypes,
+def fit_all_prototypes(x: torch.Tensor, xdot: torch.Tensor, archetypes: list=_default_archetypes,
                        diffeo_args: dict=dict(), **fitting_args: dict) -> dict:
     """
     A wrapper function that fits the given observations, x and xdot, to the list of supplied archetypes
@@ -187,7 +187,7 @@ def fit_all_archetypes(x: torch.Tensor, xdot: torch.Tensor, archetypes: list=_de
     for (a, omega, decay) in archetypes:
         g = get_oscillator(a=a, omega=omega, decay=decay)
         H = Diffeo(dim=x.shape[1], **diffeo_args)
-        H, loss, ldet, score = fit_DFORM(H, x, xdot, g, **fitting_args)
+        H, loss, ldet, score = fit_prototype(H, x, xdot, g, **fitting_args)
         H.eval()
         H.requires_grad_(False)
 

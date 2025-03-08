@@ -1,4 +1,4 @@
-from fit_archetype import fit_DFORM
+from fit_SPE import fit_prototype
 from NFDiffeo import Diffeo
 import numpy as np
 import torch
@@ -7,10 +7,7 @@ import click
 from pathlib import Path
 from Hutils import get_oscillator, simulate_trajectory, cycle_error
 from systems import LinearAug, QuadAug, DiffeoAug, ComposeAug, PhaseSpace, Augmentation
-from systems import SO, Selkov, BZreaction, Repressilator, VanDerPol, LienardSigmoid, LienardPoly, SubcriticalHopf, \
-    SupercriticalHopf
-import matplotlib
-matplotlib.use('pgf')
+from systems import SO, Selkov, BZreaction, Repressilator, VanDerPol, LienardSigmoid, LienardPoly
 from matplotlib import pyplot as plt
 import sys, logging
 plt.rcParams.update({
@@ -20,17 +17,13 @@ plt.rcParams.update({
     'figure.autolayout': True,
     'axes.labelsize': 16,
     'axes.titlesize': 16,
-    # 'font.weight': 'bold',
     'font.size': 14,
     'axes.linewidth': 2,
-    # 'axes.labelweight': 'bold',
     'lines.linewidth': 3,
     'legend.handlelength': 1.,
     'legend.handletextpad': .4,
     'legend.labelspacing': .0,
     'legend.borderpad': .4,
-    'axes.edgecolor': '#303030',
-    'savefig.facecolor': 'white',
     'text.latex.preamble': r'\usepackage{amsfonts}',
 })
 
@@ -43,8 +36,6 @@ SYSTEMS = {
     'vanderpol': VanDerPol,
     'lienardsigmoid': LienardSigmoid,
     'lienardpoly': LienardPoly,
-    'subhopf': SubcriticalHopf,
-    'suphopf': SupercriticalHopf,
 }
 
 root = 'results/'
@@ -209,7 +200,7 @@ def compile_results(path: str, dim: int):
 @click.option('--noise',    help='amount of noise to add to phase space', type=float, default=0)
 @click.option('--dim2_weight', help='relative weight of the first 2 dimensions', type=float, default=-1)
 @click.option('--save_h',   help='whether to save the model', type=int, default=0)
-@click.option('--rep',      help='repitition of the experiment (basically just adds a number to the start of the path', type=int, default=0)
+@click.option('--rep',      help='repitition of the experiment', type=int, default=0)
 @click.option('--w_decay',  help='weight decay used', type=float, default=1e-3)
 @click.option('--rem_small', help='if 1, removes velocities with norms that are small compared to the observed noise (as preprocessing)', type=int, default=0)
 def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_layers: int,
@@ -317,10 +308,10 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
         # ============================================ fit archetype ===================================================
         archetype = get_oscillator(a=a, omega=omega, decay=decay)
         H = Diffeo(dim=dim, n_layers=n_layers, K=n_freqs, rank=2).to(device)
-        H, loss, ldet, score = fit_DFORM(H, x.clone(), dx.clone(), archetype, its=its,
-                                         verbose=verbose>0, lr=lr, freeze_frac=fr_rat, det_reg=det_reg,
-                                         center_reg=cen_reg, proj_reg=proj_reg, weight_decay=w_decay,
-                                         dim2_weight=None if dim2_weight < 0 else dim2_weight)
+        H, loss, ldet, score = fit_prototype(H, x.clone(), dx.clone(), archetype, its=its, lr=lr, verbose=verbose > 0,
+                                             freeze_frac=fr_rat, det_reg=det_reg, center_reg=cen_reg,
+                                             weight_decay=w_decay, proj_reg=proj_reg,
+                                             dim2_weight=None if dim2_weight < 0 else dim2_weight)
 
         # ============================================ save stats on fit ===============================================
         res_dict['losses'].append(loss)

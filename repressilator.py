@@ -1,4 +1,4 @@
-from fit_archetype import fit_DFORM
+from fit_SPE import fit_prototype
 from NFDiffeo import Diffeo
 import numpy as np
 import torch
@@ -8,8 +8,6 @@ from pathlib import Path
 from Hutils import get_oscillator
 from systems import Repressilator, SO, PhaseSpace
 from multidim_benchmark import compile_results, plot_trajectory, param_str
-import matplotlib
-matplotlib.use('pgf')
 from matplotlib import pyplot as plt
 import sys, logging
 
@@ -180,10 +178,9 @@ def classify_all(n_points: int, job: int, lr: float, its: int, n_layers: int, n_
         # ============================================ fit archetype ==========================================
         archetype = get_oscillator(a=a, omega=omega, decay=decay)
         H = Diffeo(dim=dim, n_layers=n_layers, K=n_freqs, rank=2, affine_init=True).to(device)
-        H, loss, ldet, score = fit_DFORM(H, x.clone(), dx.clone(), archetype, its=its,
-                                         verbose=verbose>0, lr=lr, freeze_frac=fr_rat, det_reg=det_reg,
-                                         center_reg=cen_reg, proj_reg=proj_reg, weight_decay=1e-3,
-                                         dim2_weight=None if dim2_weight < 0 else dim2_weight)
+        H, loss, ldet, score = fit_prototype(H, x.clone(), dx.clone(), archetype, its=its, lr=lr, verbose=verbose > 0,
+                                             freeze_frac=fr_rat, det_reg=det_reg, center_reg=cen_reg, weight_decay=1e-3,
+                                             proj_reg=proj_reg, dim2_weight=None if dim2_weight < 0 else dim2_weight)
 
         # ============================================ save stats on fit ==========================================
         res_dict['losses'].append(loss)

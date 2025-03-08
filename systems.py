@@ -2,8 +2,6 @@ import numpy as np
 import torch
 from NFDiffeo import Diffeo
 from Hutils import get_oscillator, simulate_trajectory, cartesian_to_polar, polar_derivative_to_cartesian_derivative
-from typing import Callable
-
 
 class PhaseSpace:
     """
