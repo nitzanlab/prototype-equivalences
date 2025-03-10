@@ -4,7 +4,10 @@
 [![arXiv](https://img.shields.io/badge/arXiv-0000.00000-red.svg)](https://arxiv.org/abs/0000.00000)
 
 
-**Abstract:** Characterizing dynamical systems given limited measurements could further our understanding of many processes in nature which are inherently temporal. However, this task is challenging, especially due to transient variability in systems with equivalent long-term dynamics and the breadth of possible behaviors in dynamics systems.  We address this by introducing _**smooth prototype equivalences (SPE)**_, a framework that fits a diffeomorphism using normalizing flows to distinct prototypes — simplified dynamical systems that define equivalence classes of behavior. SPE enables classification by comparing the deformation loss of the observed sparse, high-dimensional measurements to the prototype dynamics. Furthermore, our approach enables estimation of the invariant sets of the observed dynamics through the learned mapping from prototype space to data space. Our method outperforms existing techniques in the classification of oscillatory systems and can efficiently identify invariant structures like limit cycles and fixed points in an equation-free manner, even when only a small, noisy subset of the phase space is observed.  Finally, we show how our method can be used for the detection of biological processes like the cell cycle trajectory from high-dimensional single-cell gene expression data.
+**Abstract:** Characterizing dynamical systems from limited measurements could deepen our understanding of temporal processes in nature. However, the diversity of possible behaviors and the transient variability in systems with equivalent long-term dynamics make this task challenging.
+  We address this by introducing _**smooth prototype equivalences (SPE)**_, a framework that fits a diffeomorphism using normalizing flows to distinct prototypes — simplified dynamical systems that define equivalence classes of behavior. 
+  Given sparse, high-dimensional measurements (not necessarily a time-series), SPE can classify the long-term behavior  
+ by comparing the deformation loss of multiple prototype dynamics. Furthermore, our approach enables estimation of the invariant sets of the observed dynamics through the learned mapping from prototype space to data space. Our method outperforms existing techniques in the classification of oscillatory systems and can efficiently identify invariant structures like limit cycles and fixed points in an equation-free manner, even when only a small, noisy subset of the phase space is observed.  Finally, we show how our method can be used for the detection of biological processes such as the cell cycle trajectory from high-dimensional single-cell gene expression data.
 
 ![](https://github.com/nitzanlab/prototype-equivalences/blob/main/assets/schematic.png)
 
@@ -45,7 +48,7 @@ where $a$ and $\omega$ are scalar parameters. When $a<0$, this system has a (sin
 
 ## Simulated Systems
 
-The notebook [`create_data.ipynb`](https://github.com/nitzanlab/prototype-equivalences/blob/main/create_data.ipynb) allows for the generation of the simulated systems in our experiments. The file [`systems.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/create_data.ipynb) includes implemented classes for all of the considered simulated systems with more functionalities useful for plotting. Much of these are adapted, almost as is, from [time-warp-attend](https://github.com/nitzanlab/time-warp-attend).
+The notebook [`create_data.ipynb`](https://github.com/nitzanlab/prototype-equivalences/blob/main/create_data.ipynb) allows for the generation of the simulated systems in our experiments. The file [`systems.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/create_data.ipynb) includes implemented classes for all of the considered simulated systems with more functionalities useful for plotting. Much of these are adapted from [time-warp-attend](https://github.com/nitzanlab/time-warp-attend).
 
 ## Contact
 
