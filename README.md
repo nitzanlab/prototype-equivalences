@@ -33,19 +33,10 @@ An example usage of SPE for estimating limit cycles in 2D and higher-dimensional
 
 ### Prototype Definition
 
-<<<<<<< HEAD
-To use SPE, a prototype has to be defined. In our experiments, we used limit-cycle oscillators (SO) as prototypes. These are governed by the following equations (in polar coordinates):
-
-	 $\dot{r}=r(a-r)^2$
-
-	 $\dot{\theta}=\omega$
-
-=======
-To use SPE, a prototype has to be defined. In our experiments, we used damped simple oscillators (SO) as prototypes. These are governed by the following equations (in polar coordinates):
+To use SPE, a prototype has to be defined. In our experiments, we used limit-cycle simple oscillators (SO) as prototypes. These are governed by the following equations (in polar coordinates):
 - $\dot{r}=r(a-r)^2$
 - $\dot{\theta}=\omega$
   
->>>>>>> b4902677daa7643ea05ec2fe55c54106eda9a28d
 where $a$ and $\omega$ are scalar parameters. When $a<0$, this system has a (single) node attractor at $x=y=0$, while $a>0$ has a limit cycle which is a circle with radius $\sqrt{a}$  about the origin. Positive $\omega$ implies counter-clockwise movement. Using this simple system as a prototype is optimal, as it allows us to learn a mapping from the observed data to some simple behavior. In all of our implementations, prototypes are considered as `Callable` objects. The SO prototype can be instantiated using the `get_oscillator` function from [`Hutils.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/Hutils.py).
 
 ## Simulated Systems
