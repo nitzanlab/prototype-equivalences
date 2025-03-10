@@ -33,7 +33,7 @@ An example usage of SPE for estimating limit cycles in 2D and higher-dimensional
 
 ### Prototype Definition
 
-To use SPE, a prototype has to be defined. In our experiments, we used damped simple oscillators (SO) as prototypes. These are governed by the following equations (in polar coordinates):
+To use SPE, a prototype has to be defined. In our experiments, we used limit-cycle oscillators (SO) as prototypes. These are governed by the following equations (in polar coordinates):
 
 	 $\dot{r}=r(a-r)^2$
 
