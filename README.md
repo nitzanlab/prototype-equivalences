@@ -48,7 +48,8 @@ where $a$ and $\omega$ are scalar parameters. When $a<0$, this system has a (sin
 
 ## Simulated Systems
 
-The notebook [`create_data.ipynb`](https://github.com/nitzanlab/prototype-equivalences/blob/main/create_data.ipynb) allows for the generation of the simulated systems in our experiments. The file [`systems.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/create_data.ipynb) includes implemented classes for all of the considered simulated systems with more functionalities useful for plotting. Much of these are adapted from [time-warp-attend](https://github.com/nitzanlab/time-warp-attend).
+The notebook [`create_data.ipynb`](https://github.com/nitzanlab/prototype-equivalences/blob/main/create_data.ipynb) allows for the generation of the simulated systems in our experiments. The file [`systems.py`](https://github.com/nitzanlab/prototype-equivalences/blob/main/create_data.ipynb) includes implemented classes for all of the considered simulated systems with more functionalities useful for plotting. 
+<!-- Much of these are adapted, almost as is, from [time-warp-attend](https://github.com/nitzanlab/time-warp-attend). -->
 
 ## Contact
 
