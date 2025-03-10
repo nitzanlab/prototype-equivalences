@@ -12,11 +12,15 @@
 
 ## Requirements
 
-This code is based on `python (>3.0)` and the package requirements in this repository are:
+This code is based on `python 3`. The main package requirements in this repository are:
 ```
 torch>=2.0.1
 tqdm
 matplotlib
+```
+Full requirements can be found in the `requirements.txt` file. For easy installation, use the following `pip` command:
+```
+pip install -r requirements.txt
 ```
 
 ## Basic Usage
