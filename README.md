@@ -1,7 +1,7 @@
 # Characterizing Nonlinear Dynamics via Smooth Prototype Equivalences
 [Roy Friedman](https://friedmanroy.github.io/), [Noa Moriel](https://nomoriel.github.io/), [Matthew Ricci](https://www.matthew-ricci.net/), Guy Pelc, [Yair Weiss](https://www.cs.huji.ac.il/~yweiss/), [Mor Nitzan](https://www.nitzanlab.com/)
 
-[![arXiv](https://img.shields.io/badge/arXiv-0000.00000-red.svg)](https://arxiv.org/abs/0000.00000)
+[![arXiv](https://img.shields.io/badge/arXiv-2503.10336-red.svg)](https://arxiv.org/abs/2503.10336)
 
 
 **Abstract:** Characterizing dynamical systems from limited measurements could deepen our understanding of temporal processes in nature. However, the diversity of possible behaviors and the transient variability in systems with equivalent long-term dynamics make this task challenging.
