@@ -121,6 +121,20 @@ def cycle_error(H: Diffeo, x: torch.Tensor, a: float) -> float:
     return torch.mean(err/norm).item()
 
 
+def hausdorff_error(H: Diffeo, x: torch.Tensor, a: float) -> float:
+    """
+    Calculates the Hausdorff distance of the observed points x with respect to the learned attractor
+    :param H: the diffeomorphism to the simple oscillator prototype whose damping coefficient is the input "a"
+    :param x: the trajectory, a torch tensor with shape [N, dim]
+    :param a: the damping coefficient of the SO prototype
+    :return: the Hausdorff distance of x from the invariant set defined by the diffeomorphism H
+    """
+    y = H.reverse(project_onto_attractor(a, H(x)))
+    err = (y-x)**2
+    norm = torch.var(x)
+    return (err.max()/norm).item()
+
+
 def interp_vectors(x: torch.Tensor, xdot: torch.Tensor, pos: torch.Tensor=None, smoothing: float=.5,
                    func: str='linear'):
     """
