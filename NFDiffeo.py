@@ -151,6 +151,18 @@ class RFFCoupling(nn.Module):
         y1, y2 = self._split(y)
         return self._cat(y1, self._s(y1, rev=True)*(y2 - self._t(y1)))
 
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        raise NotImplementedError
+
 
 class FFCoupling(nn.Module):
     """
@@ -319,6 +331,28 @@ class FFCoupling(nn.Module):
         y1, y2 = self._split(y)
         return self._cat(y1, self._s(y1, rev=True)*(y2 - self._t(y1)))
 
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        y1, y2 = self._split(y)
+        s, t = self._s(y1, rev=True), self._t(y1)
+        x = self._cat(y1, s*(y2 - self._t(y1)))
+
+        f1, f2 = self._split(f)  # f1 shape: [N, dim_in], f2 shape: [N, dim_out]
+        ds = - s[..., None, :] * self._df(y1, self.a_s, self.b_s, self.R)  # [N, dim_in, dim_out]
+        dt = self._df(y1, self.a_t, self.b_t, self.R)  # [N, dim_in, dim_out]
+        Jf2 = ((ds*(y2-t)[..., None, :] + s[..., None, :]*dt).transpose(-2, -1) @ f1[..., None])[..., 0] + f2 * s
+        Jf = self._cat(f1, Jf2)
+
+        return x, Jf
+
 
 class AffineCoupling(nn.Module):
 
@@ -435,6 +469,18 @@ class AffineCoupling(nn.Module):
         y1, y2 = self._split(y)
         return self._cat(y1, self._s(y1, rev=True)*(y2 - self._t(y1)))
 
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        raise NotImplementedError
+
 
 class PPT(nn.Module):
     """
@@ -503,6 +549,18 @@ class PPT(nn.Module):
         """
         beta = torch.exp(-self.alpha)
         return torch.sign(y)*torch.pow(torch.abs(y), beta[None, :])
+
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        raise NotImplementedError
 
 
 class Affine(nn.Module):
@@ -573,6 +631,21 @@ class Affine(nn.Module):
         m = y-self.mu[None]
         return torch.linalg.solve(M, m.T).T
 
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        phi = torch.exp(self.phi)
+        M = self.W @ self.W.T + torch.diag_embed(phi)
+        m = y - self.mu[None]
+        return torch.linalg.solve(M, m.T).T, torch.linalg.solve(M, f.T).T
+
 
 class LogTransf(nn.Module):
 
@@ -608,6 +681,18 @@ class LogTransf(nn.Module):
 
     def reverse(self, y: torch.Tensor) -> torch.Tensor:
         return torch.exp(y)-self.prec
+
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        raise NotImplementedError
 
 
 class PolarTransf(nn.Module):
@@ -668,6 +753,18 @@ class PolarTransf(nn.Module):
         oth = y[:, 2:]
         return torch.cat([r*torch.cos(theta), r*torch.sin(theta), oth], dim=-1)
 
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        raise NotImplementedError
+
 
 class RevPolarTransf(nn.Module):
 
@@ -722,6 +819,18 @@ class RevPolarTransf(nn.Module):
         theta = torch.arctan2(comp[:, 1], comp[:, 0])
         return torch.cat([r[:, None], theta[:, None], uncomp], dim=-1)
 
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        raise NotImplementedError
+
 
 class ActNorm(nn.Module):
 
@@ -766,7 +875,20 @@ class ActNorm(nn.Module):
         return self.forward(x), torch.exp(-self.s)[None]*f, self.logdet(x)
 
     def reverse(self, y: torch.Tensor) -> torch.Tensor:
+        if self.newinit[0] == 1: self._newinit(y)
         return torch.exp(self.s)[None]*y + self.mu[None]
+
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        return torch.exp(self.s)[None]*y + self.mu[None], torch.exp(self.s)[None]*f
 
 
 class NFCompose(nn.Module):
@@ -815,6 +937,11 @@ class NFCompose(nn.Module):
         for mod in self.transfs[::-1]:
             y = mod.reverse(y)
         return y
+
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        for mod in self.transfs[::-1]:
+            y, f = mod.jvp_reverse(y, f)
+        return y, f
 
 
 class Diffeo(nn.Module):
@@ -904,3 +1031,15 @@ class Diffeo(nn.Module):
         :return: the transformed inputs, a tensor with shape [N, dim]
         """
         return self.transf.reverse(y)
+
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        return self.transf.jvp_reverse(y, f)
