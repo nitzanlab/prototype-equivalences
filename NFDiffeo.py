@@ -343,12 +343,13 @@ class FFCoupling(nn.Module):
         """
         y1, y2 = self._split(y)
         s, t = self._s(y1, rev=True), self._t(y1)
-        x = self._cat(y1, s*(y2 - self._t(y1)))
+        x2 = s*(y2 - self._t(y1))
+        x = self._cat(y1, x2)
 
         f1, f2 = self._split(f)  # f1 shape: [N, dim_in], f2 shape: [N, dim_out]
-        ds = - s[..., None, :] * self._df(y1, self.a_s, self.b_s, self.R)  # [N, dim_in, dim_out]
-        dt = self._df(y1, self.a_t, self.b_t, self.R)  # [N, dim_in, dim_out]
-        Jf2 = ((ds*(y2-t)[..., None, :] + s[..., None, :]*dt).transpose(-2, -1) @ f1[..., None])[..., 0] + f2 * s
+        ds = x2[:, None]*self._df(y1, self.a_s, self.b_s, self.R)  # [N, dim_in, dim_out]
+        dt = s[:, None]*self._df(y1, self.a_t, self.b_t, self.R)  # [N, dim_in, dim_out]
+        Jf2 = -((ds+dt).transpose(-2, -1) @ f1[..., None])[..., 0] + f2 * s
         Jf = self._cat(f1, Jf2)
 
         return x, Jf
