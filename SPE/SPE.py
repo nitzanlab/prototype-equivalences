@@ -134,8 +134,9 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
     for i in pbar:
         optim.zero_grad()
 
-        gHx, jvp, ldet = model.loss_terms(x, xdot)
-        mseloss = torch.mean(equiv_err(gHx, jvp))  # calculate the error according to the equivalence
+        ldet = model.logdet(x)
+        pred = model.forward(x)
+        mseloss = torch.mean(equiv_err(pred, xdot))  # calculate the error according to the equivalence
 
         dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
         ploss = proj_loss(x, model, proj_reg)  # adds loss for projection
@@ -152,10 +153,11 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
     # ========================== calculate final losses for everything =================================================
     with torch.no_grad():
         ploss = proj_loss(x, model, proj_reg)  # adds loss for projection
-        gHx, jvp, ldet = model.loss_terms(x, xdot)
+        ldet = model.logdet(x)
+        pred = model.forward(x)
+        err = torch.mean(equiv_err(pred, xdot))
     dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
 
-    err = equiv_err(gHx, jvp)
     score = torch.mean(err).item()
     loss = torch.mean(err).item() + det_reg*dloss.item() + ploss.item()
     # ==================================================================================================================
