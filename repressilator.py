@@ -7,7 +7,7 @@ import click
 from pathlib import Path
 from Hutils import get_oscillator
 from systems import Repressilator, SO, PhaseSpace
-from multidim_benchmark import compile_results, plot_trajectory, param_str
+from sparse_benchmark import compile_results, plot_trajectory, param_str
 from matplotlib import pyplot as plt
 import sys, logging
 

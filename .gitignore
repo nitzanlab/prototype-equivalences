@@ -176,3 +176,6 @@ graphics/
 data/
 output/
 tmp/
+cache/
+.DS_Store
+*.ipynb

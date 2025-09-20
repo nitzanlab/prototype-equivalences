@@ -1,13 +1,13 @@
 from fit_SPE import fit_prototype
-from NFDiffeo import Diffeo
+from models.NFDiffeo import Diffeo
 import numpy as np
 import torch
 import pickle
 import click
 from pathlib import Path
-from Hutils import get_oscillator, simulate_trajectory, cycle_error
-from systems import LinearAug, QuadAug, DiffeoAug, ComposeAug, PhaseSpace, Augmentation
-from systems import SO, Selkov, BZreaction, Repressilator, VanDerPol, LienardSigmoid, LienardPoly
+from dynamics.utils import get_oscillator, simulate_trajectory
+from dynamics.systems import PhaseSpace, SO, Selkov, BZreaction, VanDerPol, LienardSigmoid, LienardPoly
+from dynamics.prototypes import SOPrototype
 from matplotlib import pyplot as plt
 import sys, logging
 plt.rcParams.update({
@@ -30,7 +30,6 @@ plt.rcParams.update({
 
 SYSTEMS = {
     'SO': SO,
-    'repressilator': Repressilator,
     'selkov': Selkov,
     'bzreaction': BZreaction,
     'vanderpol': VanDerPol,
@@ -71,16 +70,13 @@ def param_str(system: PhaseSpace):
 
 
 def traj_in_vecs(x: torch.Tensor, xdot: torch.Tensor, gt_sys: PhaseSpace, arch: PhaseSpace, H: Diffeo,
-                 T: float=40, extra_str: str='', aug: Augmentation=None, color: str='k'):
+                 T: float=40, extra_str: str='', color: str='k'):
     # choose points as initial points from which to iterate
     inds = np.random.choice(x.shape[0], 3, replace=False)
     dim = x.shape[-1]
 
     # get ground-truth trajectories
     gt_traj = gt_sys.trajectories(x[inds], T=T).detach()
-    if aug is not None:
-        traj, _ = aug(0, gt_traj.reshape(-1, x.shape[-1]), gt_traj.reshape(-1, x.shape[-1]))
-        gt_traj = traj.reshape(gt_traj.shape)
 
     # get fitted trajectories
     y = H.forward(x[inds]).detach()
@@ -88,7 +84,7 @@ def traj_in_vecs(x: torch.Tensor, xdot: torch.Tensor, gt_sys: PhaseSpace, arch: 
     traj = H.reverse(traj.reshape(-1, traj.shape[-1])).reshape(traj.shape).detach()
 
     if dim > 2:
-        # move all observables to 2D archetype space
+        # move all observables to 2D prototype space
         x, xdot, _ = H.jvp_forward(x, xdot)
         x, xdot = x[..., :2].detach(), xdot[..., :2].detach()
 
@@ -123,14 +119,10 @@ def traj_in_vecs(x: torch.Tensor, xdot: torch.Tensor, gt_sys: PhaseSpace, arch: 
     plt.title(title_str+extra_str, color=color)
 
 
-def plot_trajectory(dim: int, system: PhaseSpace, T: float, save_path: str, aug: Augmentation=None):
+def plot_trajectory(dim: int, system: PhaseSpace, T: float, save_path: str):
     init = torch.rand(7, dim)*(system.position_lims[1]-system.position_lims[0]) + system.position_lims[0]
     traj = system.trajectories(init, T=T)
     t = np.linspace(0, T, traj.shape[0])
-
-    if aug is not None:
-        atraj, _ = aug.forward(0, traj.reshape(-1, dim), traj.reshape(-1, dim))
-        traj = atraj.reshape(traj.shape)
 
     traj = traj.numpy()
 
@@ -152,7 +144,7 @@ def plot_trajectory(dim: int, system: PhaseSpace, T: float, save_path: str, aug:
 
 
 def compile_results(path: str, dim: int):
-    archetypes = [
+    prototypes = [
         [-.25, -.5, .25],
         [.25, -.5, .25],
         [-.25, .5, .25],
@@ -160,9 +152,9 @@ def compile_results(path: str, dim: int):
     ]
 
     full_dict = {
-        'archetypes': archetypes
+        'prototypes': prototypes
     }
-    fields = ['losses', 'logdets', '2Dlosses', 'data_mean', 'data_std', 'params', 'cycle-errors']
+    fields = ['losses', 'logdets', '2Dlosses', 'data_mean', 'data_std', 'params', 'cycle-errors', 'hausdorff-errors']
 
     for field in fields: full_dict[field] = []
     for i in range(1000):
@@ -238,15 +230,7 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
     np.random.seed(job)
 
     system = SYSTEMS[exp_type]()
-
-    # ============================================ add augmentations ===================================================
-    augmentaions = []
-    if linaug > 0: augmentaions.append(LinearAug(dim=dim))
-    if quadaug > 0: augmentaions.append(QuadAug(dim=dim, amnt=quadaug))
-    if diffaug > 0: augmentaions.append(DiffeoAug(dim=dim, init_amnt=diffaug))
-    augment = ComposeAug(*augmentaions)
     parameters = system.parameters
-    # ============================================ add augmentations ===================================================
 
     logging.info('\n\n')
     logging.info('; '.join(f'{k}={v:.2f}' for k, v in parameters.items()))
@@ -256,7 +240,7 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
 
     # plot the observed (augmented) system
     if (linaug > 0 or quadaug > 0 or diffaug > 0) and dim > 2:
-        plot_trajectory(dim, system, time, path + f'{job}_augmented_trajectories.png', aug=augment)
+        plot_trajectory(dim, system, time, path + f'{job}_augmented_trajectories.png')
 
     # iterate points on trajectory for a bit, so they'll be closer to the invariant set
     init = torch.rand(n_points, dim)*(system.position_lims[1]-system.position_lims[0]) + system.position_lims[0]
@@ -264,7 +248,6 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
     dx = system(0, x)
 
     # augment points
-    x, dx = augment(0, x, dx)
     dx = dx + torch.randn_like(dx)*noise
 
     # as a preprocessing step for our method, removes all vectors with norms that are too small compared to noise
@@ -272,7 +255,7 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
         norms = torch.norm(dx, dim=1)
         x, dx = x[norms > dim*noise], dx[norms > dim*noise]
 
-    archetypes = [
+    prototypes = [
         [-.25, -.5, .25],
         [.25, -.5, .25],
         [-.25, .5, .25],
@@ -280,11 +263,12 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
     ]
 
     res_dict = {
-        'archetypes': archetypes,
+        'prototypes': prototypes,
         'losses': [],
         'logdets': [],
         '2Dlosses': [],
         'cycle-errors': [],
+        'hausdorff-errors': [],
         'data_mean': torch.mean(x).item(),
         'data_std': torch.std(x).item(),
         'params': parameters,
@@ -302,13 +286,13 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
     cycle_traj = system.trajectories(x[:1], T=50)
     cycle_traj = cycle_traj[cycle_traj.shape[0]//2:][:, 0]
 
-    plt.figure(figsize=(7, 4*len(archetypes)//2))
+    plt.figure(figsize=(7, 4*len(prototypes)//2))
     subplot = 1
-    for (a, omega, decay) in res_dict['archetypes']:
-        # ============================================ fit archetype ===================================================
-        archetype = get_oscillator(a=a, omega=omega, decay=decay)
+    for (a, omega, decay) in res_dict['prototypes']:
+        # ============================================ fit prototype ===================================================
+        prototype = get_oscillator(a=a, omega=omega, decay=decay)
         H = Diffeo(dim=dim, n_layers=n_layers, K=n_freqs, rank=2).to(device)
-        H, loss, ldet, score = fit_prototype(H, x.clone(), dx.clone(), archetype, its=its, lr=lr, verbose=verbose > 0,
+        H, loss, ldet, score = fit_prototype(H, x.clone(), dx.clone(), prototype, its=its, lr=lr, verbose=verbose > 0,
                                              freeze_frac=fr_rat, det_reg=det_reg, center_reg=cen_reg,
                                              weight_decay=w_decay, proj_reg=proj_reg,
                                              dim2_weight=None if dim2_weight < 0 else dim2_weight)
@@ -317,15 +301,13 @@ def classify_all(exp_type: str, n_points: int, job: int, lr: float, its: int, n_
         res_dict['losses'].append(loss)
         res_dict['logdets'].append(ldet)
         res_dict['2Dlosses'].append(score)
-        cerr = cycle_error(H, cycle_traj.to(device), a)
-        res_dict['cycle-errors'].append(cerr)
 
-        logging.info(f'archetype a={a:.2f} om={omega:.2f}: loss={loss:.4f}; ldet={ldet:.2f}, 2D loss={score:.3f}\n')
+        logging.info(f'prototype a={a:.2f} om={omega:.2f}: loss={loss:.4f}; ldet={ldet:.2f}, 2D loss={score:.3f}\n')
         # ============================================ plots ==========================================
-        plt.subplot(len(archetypes)//2, 2, subplot)
+        plt.subplot(len(prototypes)//2, 2, subplot)
         traj_in_vecs(x.clone(), dx.clone(), system, SO(a=a, omega=omega, decay=decay),
-                     H, T=20, extra_str=f'loss={loss:.3f} ; ldet={ldet:.3f}\ncycle={cerr:.2f} ; 2D-loss={score:.3f}',
-                     aug=augment, color='blue' if np.sign(a)==np.sign(system.parameters['bif']) else 'red')
+                     H, T=20, extra_str=f'loss={loss:.3f} ; ldet={ldet:.3f}\n2D-loss={score:.3f}',
+                     color='blue' if np.sign(a)==np.sign(system.parameters['bif']) else 'red')
         subplot += 1
         if save_h > 0: torch.save(H, path + f'{job}_a={a:.2f}_om={omega:.2f}.pth')
     plt.tight_layout()

@@ -1,7 +1,9 @@
 import numpy as np
 import torch
-from NFDiffeo import Diffeo
-from Hutils import get_oscillator, simulate_trajectory, cartesian_to_polar, polar_derivative_to_cartesian_derivative
+from .utils import get_oscillator, simulate_trajectory,\
+    cartesian_to_polar, polar_derivative_to_cartesian_derivative
+from models.NFDiffeo import FFCoupling, NFCompose
+
 
 class PhaseSpace:
     """
@@ -16,16 +18,15 @@ class PhaseSpace:
         self.parameters = parameters
         self.parameters['bif'] = self.dist_from_bifur()
 
-    def forward(self, t: float, z: torch.Tensor) -> torch.Tensor:
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
         """
         Calculates the velocities of the system at the positions given by z
-        :param t: a float depicting the time
         :param z: a torch tensor with shape [N, d] where N is the number of points and d the dimension
         :return: the velocities of the system, a torch tensor with shape [N, d]
         """
         raise NotImplementedError
 
-    def __call__(self, t: float, z:torch.Tensor) -> torch.Tensor: return self.forward(t, z)
+    def __call__(self, z:torch.Tensor) -> torch.Tensor: return self.forward(z)
 
     def dist_from_bifur(self) -> float:
         """
@@ -60,28 +61,6 @@ class PhaseSpace:
         :return: a torch tensor with shape [N, dim]
         """
         return torch.rand(N, dim)*(self.position_lims[1] - self.position_lims[0]) + self.position_lims[0]
-
-
-class Augmentation:
-
-    def forward(self, t: float, z: torch.Tensor, f: torch.Tensor) -> [torch.Tensor, torch.Tensor]:
-        """
-        Calculates the augmented velocities at position z and initial velocities f. The positions are updated according
-        to the specific augmentation and the velocities are defined accordingly:
-            - x = H(z)
-            - dx = J(H(z))@f
-        where J(H(z)) is the Jacobian of the augmentation at point z
-        :param t: a float depicting the time (which is ignored in this case)
-        :param z: the positions as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :param f: the velocities as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :return: the new positions and velocities, both torch tensors with shape [N, d]
-        """
-        raise NotImplementedError
-
-    def zforward(self, t: float, z: torch.Tensor) -> torch.Tensor:
-        return self.forward(t, z, z)[0]
-
-    def __call__(self, t, x, f): return self.forward(t, x, f)
 
 
 # ================================================= ^^ Definitions ^^ =================================================
@@ -122,13 +101,13 @@ class SO(PhaseSpace):
         return {'a': a, 'omega': omega}
 
     @torch.no_grad()
-    def forward(self, t, x):
+    def forward(self, x):
         shape = x.shape
         x = x.reshape(-1, x.shape[-1])
         dx = self.osc(x)
         return dx.reshape(shape)
 
-    def __call__(self, t, x): return self.forward(t, x)
+    def __call__(self, x): return self.forward(x)
 
     @torch.no_grad()
     def get_cycle(self):
@@ -143,6 +122,8 @@ class SO(PhaseSpace):
         :return: if smaller than 0, then the dynamics are a node attractor, otherwise they are cyclic
         """
         return self.parameters['a']
+
+    def __str__(self): return 'SO'
 
 
 class Repressilator(PhaseSpace):
@@ -182,6 +163,8 @@ class Repressilator(PhaseSpace):
         self.n = n
         self.a0 = alpha0
         super().__init__({'alpha': alpha, 'beta': beta})
+
+    def __str__(self): return 'Repressilator'
 
     @staticmethod
     def random_cycle_params() -> dict:
@@ -224,10 +207,9 @@ class Repressilator(PhaseSpace):
         return self._bifur_dist(alpha=self.parameters['alpha'], beta=self.parameters['beta'], a0=self.a0, n=self.n)
 
     @torch.no_grad()
-    def forward(self, t: float, z: torch.Tensor) -> torch.Tensor:
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
         """
         Calculates the velocities of the specific repressilator system at the positions given by z
-        :param t: a float depicting the time (which is ignored in this case)
         :param z: a torch tensor with shape [N, 6] where N is the number of points
         :return: the velocities of the repressilator, a torch tensor with shape [N, 6]
         """
@@ -258,8 +240,6 @@ class Repressilator(PhaseSpace):
                           pcI_dot.unsqueeze(-1)], dim=-1)
 
         return zdot
-
-    def __call__(self, t, x): return self.forward(t, x)
 
     def trajectories(self, x: torch.Tensor, T: float, step: float=1e-2, euler: bool=False) -> torch.Tensor:
         dim = x.shape[-1]
@@ -311,7 +291,7 @@ class BZreaction(PhaseSpace):
         'b': r'$b$',
     }
 
-    position_lims = [0, 30]
+    position_lims = [0, 10]
 
     def __init__(self, a: float=None, b: float=None, decay: float=None):
         super().__init__({'a': a, 'b': b, 'decay': decay})
@@ -328,10 +308,12 @@ class BZreaction(PhaseSpace):
         b = np.random.rand() * (max_b - b_range[0]) + b_range[0]
         return {'a': a, 'b': b}
 
-    def forward(self, t, z):
+    def __str__(self): return 'BZReaction'
+
+    def forward(self, z):
         a, b, decay = self.parameters['a'], self.parameters['b'], self.parameters['decay']
-        x = z[..., 0]
-        y = z[..., 1]
+        x = z[..., 0] + 1e-3
+        y = z[..., 1] + 1e-3
         nonosc = z[..., 2:]
 
         xdot = a - x - 4 * x * y / (1 + x ** 2)
@@ -367,7 +349,7 @@ class Selkov(PhaseSpace):
         'b': r'$b$',
     }
 
-    position_lims = [0, 5]
+    position_lims = [0, 3]
 
     def __init__(self, a: float=None, b: float=None, decay: float=None):
         super().__init__({'a': a, 'b': b, 'decay': decay})
@@ -384,7 +366,9 @@ class Selkov(PhaseSpace):
         b = np.random.rand() * (f_max - f_min) + f_min
         return {'a': a, 'b': b}
 
-    def forward(self, t, z):
+    def __str__(self): return 'Selkov'
+
+    def forward(self, z):
         a, b, decay = self.parameters['a'], self.parameters['b'], self.parameters['decay']
 
         x = z[..., 0]
@@ -402,63 +386,6 @@ class Selkov(PhaseSpace):
         f_plus = np.sqrt(1 / 2 * (1 - 2 * a + np.sqrt(1 - 8 * a)))
         f_minus = np.sqrt(1 / 2 * (1 - 2 * a - np.sqrt(1 - 8 * a)))
         return 1 if f_minus <= b <= f_plus else -1
-
-
-class SubcriticalHopf(PhaseSpace):
-    """
-    Subcritical Hopf bifurcation:
-        rdot = mu * r + r^3 - r^5
-        thetadot = omega + b*r^2
-    where:
-    - mu controls stability of fixed point at the origin
-    - omega controls frequency of oscillations
-    - b controls dependence of frequency on amplitude
-
-    Strogatz, p.252
-    copied from twa
-    """
-
-    param_ranges = {
-        'mu': [-.5, .25],
-        'omega': [-1, 1],
-        'b': [-1, 1],
-        'decay': [1 / 6, 1]
-    }
-
-    param_display = {
-        'mu': r'$\mu$',
-        'omega': r'$\omega$',
-        'b': r'$b$',
-    }
-
-    position_lims = [-1, 1]
-
-    def __init__(self, mu: float=None, omega: float=None, b: float=None, decay: float=None):
-        super().__init__({'mu': mu, 'omega': omega, 'b': b, 'decay': decay})
-
-    def forward(self, t, z, **kwargs):
-        x = z[..., 0]
-        y = z[..., 1]
-        nonosc = z[..., 2:]
-
-        mu = self.parameters['mu']
-        omega = self.parameters['omega']
-        b = self.parameters['b']
-        decay = self.parameters['decay']
-
-        r, theta = cartesian_to_polar(x, y)
-
-        rdot = mu * r + r ** 3 - r ** 5
-        thetadot = omega + b * r ** 2
-
-        xdot, ydot = polar_derivative_to_cartesian_derivative(r, theta, rdot, thetadot)
-
-        zdot = torch.cat([xdot.unsqueeze(-1), ydot.unsqueeze(-1), -decay*nonosc], dim=-1)
-        return zdot
-
-    def dist_from_bifur(self):
-        return self.parameters['mu']
-
 
 class SupercriticalHopf(PhaseSpace):
     """
@@ -492,7 +419,9 @@ class SupercriticalHopf(PhaseSpace):
     def __init__(self, mu: float=None, omega: float=None, b: float=None, decay: float=None):
         super().__init__({'mu': mu, 'omega': omega, 'b': b, 'decay': decay})
 
-    def forward(self, t, z, **kwargs):
+    def __str__(self): return 'SupercriticalHopf'
+
+    def forward(self, z, **kwargs):
         x = z[..., 0]
         y = z[..., 1]
         mu = self.parameters['mu']
@@ -545,7 +474,9 @@ class VanDerPol(PhaseSpace):
         mu = VanDerPol.param_ranges['mu'][1]*np.random.rand()
         return {'mu': mu}
 
-    def forward(self, t, z, **kwargs):
+    def __str__(self): return 'VanDerPol'
+
+    def forward(self, z, **kwargs):
         x = z[..., 0]
         y = z[..., 1]
 
@@ -582,7 +513,7 @@ class Lienard(PhaseSpace):
 
         self.flip = flip
 
-    def forward(self, t, z):
+    def forward(self, z):
         x = z[..., 0]
         y = z[..., 1]
         decay = self.parameters['decay']
@@ -639,6 +570,8 @@ class LienardPoly(Lienard):
         c = LienardPoly.param_ranges['c'][0] * np.random.rand()
         return {'c': c}
 
+    def __str__(self): return 'LienardPoly'
+
     def dist_from_bifur(self):
         return -self.parameters['c']
 
@@ -683,214 +616,190 @@ class LienardSigmoid(Lienard):
         b = LienardSigmoid.param_ranges['b'][0] * np.random.rand()
         return {'b': b}
 
+    def __str__(self): return 'LienardSigmoid'
+
     def dist_from_bifur(self):
         return -self.parameters['b']
 
 
+class MultiStable(PhaseSpace):
+
+    position_lims = [-1, 1]
+
+    def __init__(self, k: int=1, dim: int=2, a: torch.Tensor=None, pos: torch.Tensor=None, sigma: float=.1):
+        super().__init__({})
+
+        self.a = a
+        if a is None: self.a = torch.ones(k)
+
+        self.pos = pos
+        if pos is None:
+            self.pos = torch.rand(k, dim)*(self.position_lims[1]-self.position_lims[0]) + self.position_lims[0]
+            self.pos = self.pos*.9
+
+        self.sigma = sigma
+
+    def __str__(self):
+        return 'MultiStable'
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        d = torch.sum(z * z, dim=-1)[:, None] - 2 * z @ self.pos.T + torch.sum(self.pos * self.pos, dim=-1)[None]
+        p = -.5 * d / self.sigma
+        p = torch.exp(p - torch.logsumexp(p, dim=-1, keepdim=True))
+
+        return torch.sum(p[..., None] * self.a[None, :, None] * (self.pos[None] - z[:, None]), dim=1)
+
+    def dist_from_bifur(self) -> float: return 0
+
+
+class MultiBasin(PhaseSpace):
+
+    position_lims = [-3, 3]
+
+    def __init__(self, n_basin: int, a: torch.Tensor=None, omega: torch.Tensor=None, logw: torch.Tensor=None,
+                 centers: torch.Tensor=None, logs: torch.Tensor=None):
+        super().__init__({})
+        self.a = a if a is not None else torch.rand(n_basin)-.5
+        self.om = omega if omega is not None else 2*torch.rand(n_basin)-1
+        self.logw = logw if logw is not None else torch.zeros(n_basin)
+        self.s = logs if logs is not None else torch.log(torch.tensor([.5]))
+        self.cen = centers if centers is not None else torch.randn(n_basin, 2)
+
+    def __str__(self):
+        return f'MultiBasin_nodes={int(np.sum(self.a<0))}_cycles={int(np.sum(self.a>0))}'
+
+    def forward(self, x: torch.Tensor):
+        shape = x.shape
+        x = x.reshape(x.shape[0], -1)
+        m = x[:, None] - self.cen[None, :]
+        r = torch.sqrt(torch.sum(m**2, dim=-1))
+        theta = torch.atan2(m[..., 1], m[..., 0])
+
+        rdot = r*(self.a[None]-r*r)
+
+        xdot = torch.cat([
+            (torch.cos(theta)*rdot - r*torch.sin(theta)*self.om[None])[..., None],
+            (torch.sin(theta)*rdot + r*torch.cos(theta)*self.om[None])[..., None]
+        ], dim=-1)
+        w = torch.exp(self.logw)
+
+        s = torch.exp(self.s)
+        D = torch.sum(x*x, dim=-1)[:, None] - 2*x@self.cen.T + torch.sum(self.cen*self.cen, dim=-1)[None, :]
+        D = torch.exp(-D/s - torch.logsumexp(-D/s, dim=1, keepdim=True))
+        return torch.sum(xdot*D[..., None]*w[None, :, None], dim=1).reshape(shape)
+
+    def dist_from_bifur(self) -> float: return 0
+
+
 # ================================================= ^^ Systems ^^ =====================================================
-# ================================================= vv Augmentations vv ===============================================
 
+# ================================================= vv Perturbations vv ================================================
 
-class DiffeoAug(Augmentation):
+class RBFPerturbation(PhaseSpace):
+    """
+    Perturbation of a given system using an RBF kernel
+    """
 
-    def __init__(self, dim: int, layers: int=4, K: int=6, init_amnt: float=.01,
-                 RFF: bool=False):
-        """
-        Initializes a random augmentation using a diffeomorphism defined according to a normalizing flow, where all
-        parameters are initialized by a given amount
-        :param dim: the dimension of the underlying dynamics
-        :param layers: the number of Affine-Coupling1-Coupling2 layers to use in the normalizing flow
-        :param K: the width of the hidden units of the affine coupling layers
-        :param init_amnt: a float depicting the strength of the augmentation, where 0 is the identity transformation
-        :param RFF:
-        """
-        super().__init__()
-        self.diffeo = Diffeo(dim=dim, n_layers=layers, K=K, MLP=False, actnorm=False, RFF=True)
-        for param in self.diffeo.parameters():
-            param.data = torch.randn_like(param) * init_amnt / np.prod(param.shape)
-
-    @torch.no_grad()
-    def forward(self, t: float, z: torch.Tensor, f: torch.Tensor) -> [torch.Tensor, torch.Tensor]:
-        """
-        Calculates the augmented velocities at position z and initial velocities f. The positions are updated according
-        to the specific augmentation and the velocities are defined accordingly:
-            - x = H(z)
-            - dx = J(H(z))@f
-        where J(H(z)) is the Jacobian of the augmentation at point z
-        :param t: a float depicting the time (which is ignored in this case)
-        :param z: the positions as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :param f: the velocities as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :return: the new positions and velocities, both torch tensors with shape [N, d]
-        """
-        shape = z.shape
-        z = z.reshape(-1, z.shape[-1])
-        f = f.reshape(-1, z.shape[-1])
-
-        x, dx, _ = self.diffeo.jvp_forward(z, f)
-        return x.reshape(shape).detach(), dx.reshape(shape).detach()
-
-
-class QuadAug(Augmentation):
-
-    def __init__(self, dim: int, amnt: float=.1):
-        """
-        Initializes a random quadratic augmentation with the given amount. The augmentation changes each coordinate so
-        that:
-            - x_i = z^T A_i z
-        :param dim: the dimension of the input dynamics
-        :param amnt: the amount of the augmentation, where 0 is identity
-        """
-        super().__init__()
-        A = torch.randn(dim, dim, dim)
-        A = A@A.permute(0, 2, 1) + .1 * torch.eye(dim)[None]
-        A, s, _ = torch.linalg.svd(A, full_matrices=True)
-        self.A = amnt*A@torch.diag_embed(s.clamp(.5, 2)) @ A.permute(0, 2, 1)
-
-    @torch.no_grad()
-    def forward(self, t: float, z: torch.Tensor, f: torch.Tensor) -> [torch.Tensor, torch.Tensor]:
-        """
-        Calculates the augmented velocities at position z and initial velocities f. The positions are updated according
-        to the specific augmentation and the velocities are defined accordingly:
-            - x = H(z)
-            - dx = J(H(z))@f
-        where J(H(z)) is the Jacobian of the augmentation at point z
-        :param t: a float depicting the time (which is ignored in this case)
-        :param z: the positions as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :param f: the velocities as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :return: the new positions and velocities, both torch tensors with shape [N, d]
-        """
-        shape = z.shape
-        z = z.reshape(-1, z.shape[-1])
-        f = f.reshape(-1, f.shape[-1])
-
-        x = torch.einsum('ijk,nj,nk->ni', self.A, z, z)
-        dx = 2*torch.einsum('ijk,nk,nj->ni', self.A, z, f)
-        return x.reshape(shape), dx.reshape(shape)
-
-
-class LinearAug(Augmentation):
-
-    def __init__(self, dim: int):
-        """
-        Initializes a random linear augmentation to add on high-dimensional dynamical systems. The augmentation is
-        defined as:
-            - x = B z
-        where B is a [dim, dim] matrix
-        :param dim: the dimension of the input dynamics
-        """
-        super().__init__()
-        B = torch.rand(dim, dim)
-        B = B@B.T + .5 * torch.eye(dim)
-        B, s, _ = torch.linalg.svd(B, full_matrices=True)
-        self.B = B @ torch.diag_embed(torch.sqrt(s.clamp(.5, 2.)))
-
-    @torch.no_grad()
-    def forward(self, t: float, z: torch.Tensor, f: torch.Tensor) -> [torch.Tensor, torch.Tensor]:
-        """
-        Calculates the augmented velocities at position z and initial velocities f. The positions are updated according
-        to the specific augmentation and the velocities are defined accordingly:
-            - x = H(z)
-            - dx = J(H(z))@f
-        where J(H(z)) is the Jacobian of the augmentation at point z
-        :param t: a float depicting the time (which is ignored in this case)
-        :param z: the positions as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :param f: the velocities as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :return: the new positions and velocities, both torch tensors with shape [N, d]
-        """
-        shape = z.shape
-        z = z.reshape(-1, z.shape[-1])
-        f = f.reshape(-1, f.shape[-1])
-
-        x = z@self.B.to(z.device)
-        dx = f@self.B.to(f.device)
-        return x.reshape(shape), dx.reshape(shape)
-
-
-class PermuteAug(Augmentation):
-
-    def __init__(self, dim: int):
-        """
-        Initializes a random permutation to add on high-dimensional dynamical systems
-        :param dim: the dimension of the input dynamics
-        """
-        super().__init__()
-        self.inds = torch.randperm(dim)
-
-    @torch.no_grad()
-    def forward(self, t: float, z: torch.Tensor, f: torch.Tensor) -> [torch.Tensor, torch.Tensor]:
-        """
-        Calculates the augmented velocities at position z and initial velocities f. The positions are updated according
-        to the specific augmentation and the velocities are defined accordingly:
-            - x = H(z)
-            - dx = J(H(z))@f
-        where J(H(z)) is the Jacobian of the augmentation at point z
-        :param t: a float depicting the time (which is ignored in this case)
-        :param z: the positions as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :param f: the velocities as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :return: the new positions and velocities, both torch tensors with shape [N, d]
-        """
-        return z[..., self.inds], f[..., self.inds]
-
-
-class ComposeAug(Augmentation):
-
-    def __init__(self, *augs: 'Augmentation'):
-        """
-        Composes a number of augmentations on top of the given dynamical system
-        :param system: the system to augment, which must be a Callable
-        :param augs:
-        """
-        super().__init__()
-        self.augs = augs
-
-    @torch.no_grad()
-    def forward(self, t: float, z: torch.Tensor, f: torch.Tensor) -> [torch.Tensor, torch.Tensor]:
-        """
-        Calculates the augmented velocities at position z and initial velocities f. The positions are updated according
-        to the specific augmentation and the velocities are defined accordingly:
-            - x = H(z)
-            - dx = J(H(z))@f
-        where J(H(z)) is the Jacobian of the augmentation at point z
-        :param t: a float depicting the time (which is ignored in this case)
-        :param z: the positions as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :param f: the velocities as a torch tensor with shape [N, d] where N is the number of points and d the dimension
-        :return: the new positions and velocities, both torch tensors with shape [N, d]
-        """
-        for aug in self.augs:
-            z, f = aug(t, z, f)
-        return z, f
-
-
-class AugSystem(PhaseSpace):
-
-    def __init__(self, system: 'PhaseSpace', H: 'Augmentation'):
-        """
-        Composes a number of augmentations on top of the given dynamical system
-        :param system: the system to augment, which must be a PhaseSpace object
-        :param H: the diffeomorphism to apply to the system, which must be callable
-        """
+    def __init__(self, system: PhaseSpace, n_control: int=1, dim: int=2, length_scale: float=None,
+                 max_weight: float=None):
         self.system = system
-        self.H = H
-
-        self.position_lims = system.position_lims
+        super().__init__(system.parameters)
         self.param_ranges = system.param_ranges
         self.param_display = system.param_display
+        self.position_lims = system.position_lims
+
+        if length_scale is None: length_scale = np.random.rand()*.9 + .1
+        self.lscale = length_scale
+
+        if max_weight is None: max_weight = np.random.rand()*.5
+        self.max_weight = max_weight
+
+        self.controls = self.random_x(n_control, dim)
+
+    @staticmethod
+    def random_cycle_params() -> dict: raise NotImplementedError
+
+    def __str__(self): return f'perturbed_{str(self.system)}'
+
+    def forward(self, z):
+        D = torch.sum(z*z, dim=-1)[:, None] - 2*z@self.controls.T + torch.sum(self.controls*self.controls, dim=-1)[None]
+        D = -.5*D/(self.lscale**2)
+        weights = torch.exp(D)[:, :, None]*self.max_weight
+
+        x = torch.sum((1-weights)*z[:, None] + weights*self.controls[None], dim=1)
+
+        return self.system.forward(x)
+
+    def dist_from_bifur(self):
+        return self.system.dist_from_bifur()
+
+
+class NFPerturbation(PhaseSpace):
+    """
+    Perturbation of a given system using a normalizing flow
+    """
+
+    def __init__(self, system: PhaseSpace, dim: int=2, n_layers: int=2, n_freqs: int=3, init: float=.1):
+        self.system = system
         super().__init__(system.parameters)
+        self.param_ranges = system.param_ranges
+        self.param_display = system.param_display
+        self.position_lims = system.position_lims
 
-    def forward(self, t, x):
-        f = self.system(t, x)
-        return self.H(t, x, f)[1]
+        layers = []
+        for i in range(n_layers):
+            layers += [FFCoupling(dim=dim, K=n_freqs, scale_free=True, R=15),
+                       FFCoupling(dim=dim, K=n_freqs, scale_free=True, reverse=True, R=15)]
+        self.NF = NFCompose(*layers)
+        self.NF.requires_grad_(False)
+        for name, param in self.NF.named_parameters():
+            param.data = torch.randn_like(param)*init
 
-    def dist_from_bifur(self) -> float: return self.system.dist_from_bifur()
+    @staticmethod
+    def random_cycle_params() -> dict: raise NotImplementedError
 
-    def trajectories(self, x: torch.Tensor, T: float, step: float=1e-2, euler: bool=False) -> torch.Tensor:
-        x = torch.clamp(x, self.position_lims[0], self.position_lims[1])
-        traj = simulate_trajectory(self.system.forward, x, T=T, step=step, euler=euler)
-        return self.H.zforward(0, traj.reshape(-1, x.shape[-1])).reshape(traj.shape)
+    def __str__(self): return f'perturbed_{str(self.system)}'
 
-    def rand_on_traj(self, x: torch.Tensor, T: float, step: float=1e-2, euler: bool=False) -> torch.Tensor:
-        traj = self.trajectories(x, T=T, step=step, euler=euler)
-        pts = []
-        for i in range(x.shape[0]):
-            pts.append(traj[np.random.choice(traj.shape[0], 1)[0], i])
-        return torch.stack(pts)
+    def forward(self, z):
+        x = self.NF(z)
+        return self.system.forward(x)
+
+    def dist_from_bifur(self):
+        return self.system.dist_from_bifur()
+
+
+class AffineLifting(PhaseSpace):
+    """
+    Lifting of a given system into a higher dimension through an affine transformation
+    """
+
+    def __init__(self, system: PhaseSpace, dim: int=3, decay: float=.5):
+        self.system = system
+        super().__init__(system.parameters)
+        self.param_ranges = system.param_ranges
+        self.param_display = system.param_display
+        self.position_lims = system.position_lims
+
+        self.trans = self.random_x(1, dim)[0]*0   # translation in space
+        self.A = torch.randn(dim, 2)    # random hyperplane on which data is lifted
+        self.proj = torch.linalg.solve(self.A.T@self.A, self.A.T)   # projection matrix onto hyperplane
+
+        self.decay = decay
+
+    @staticmethod
+    def random_cycle_params() -> dict: raise NotImplementedError
+
+    def __str__(self): return f'lifted_{str(self.system)}'
+
+    def forward(self, z):
+        x = (z-self.trans[None])@self.A
+        xdot = self.system.forward(x)@self.proj
+
+        proj_dot = self.decay*(z@self.proj.T@self.A.T - z)
+
+        return xdot + proj_dot
+
+    def dist_from_bifur(self):
+        return self.system.dist_from_bifur()
+
+# ================================================= ^^ Perturbations ^^ ================================================
