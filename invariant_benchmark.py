@@ -83,8 +83,7 @@ def eval_estimate(x, xdot, system, model, eval_t, eval_n, dim):
     sys_sim = simulate_trajectory(system, inits, T=eval_t)[-1]
 
     # get distribution of points from the model
-    if isinstance(model, NFSmoothOrbital): model_sim = model.get_invariant(eval_n)
-    else: model_sim = simulate_trajectory(model, inits, T=eval_t)[-1]
+    model_sim = simulate_trajectory(model, inits, T=eval_t)[-1]
 
     model_evs = [
         invariant_distribution_error(sys_sim.clone(), model_sim.clone(), distance='swd'),
