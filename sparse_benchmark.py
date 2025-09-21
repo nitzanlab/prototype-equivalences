@@ -105,11 +105,8 @@ def DSA_classify(x, xdot):
 @click.option('--n_freqs',     help='number of frequencies in coupling', type=int, default=5)
 @click.option('--snr',         help='Signal to noise ratio in observed velocities', type=float, default=5.)
 @click.option('--t_max',       help='max integration time for simulation', type=float, default=3.)
-@click.option('--eval_t',      help='integration time to use for evaluation', type=float, default=100.)
-@click.option('--eval_n',      help='number of points to use during evaluation', type=int, default=1000)
-@click.option('--nodes',       help='whether nodes are part of the test set', type=int, default=1)
 def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
-                 n_freqs: int, snr: float, t_max: float, eval_t: float, eval_n: int, nodes: int):
+                 n_freqs: int, snr: float, t_max: float):
 
     # ============================= define paths ==================================================#
     path_root = root + f'results/sparse_classify_dim={dim}/'
@@ -119,7 +116,6 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
         f'layers={n_layers}_'
         f'freqs={n_freqs}_'
         f'T={t_max:.2f}'
-        f'{"_nodes" if nodes==1 else ""}'
     )
     path = path_root + name + '/'
     Path(path).mkdir(parents=True, exist_ok=True)
@@ -127,7 +123,6 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
     global config
     config['n-layers'] = n_layers
     config['n-freqs'] = n_freqs
-    config['nodes'] = nodes
 
     # ============================= logging =======================================================#
     # write all hyperparameters to a file
@@ -152,14 +147,9 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
     torch.manual_seed(job)
     np.random.seed(job)
     ks = np.random.choice(len(SYSTEMS), n)
-    if nodes==0:
-        systems = [
-            SYSTEMS[i](**SYSTEMS[i].random_cycle_params()) for i in ks
-        ]
-    else:
-        systems = [
-            SYSTEMS[i]() for i in ks
-        ]
+    systems = [
+        SYSTEMS[i]() for i in ks
+    ]
 
     if dim > 2:
         systems = [
