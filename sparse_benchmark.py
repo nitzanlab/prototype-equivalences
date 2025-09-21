@@ -126,15 +126,15 @@ def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: 
     config['SPE-its'] = its
 
     # ============================= logging =======================================================#
-    # write all hyperparameters to a file
-    open(path + f'{job}.log', 'w').close()
-    handlers = [logging.FileHandler(path + f'{job}.log')]
-    logging.basicConfig(format='',
-                        level=logging.INFO,
-                        handlers=handlers
-                        )
-
-    logging.info('\n'.join(f'{k}={v}' for k, v in locals().items()))
+    # # write all hyperparameters to a file
+    # open(path + f'{job}.log', 'w').close()
+    # handlers = [logging.FileHandler(path + f'{job}.log')]
+    # logging.basicConfig(format='',
+    #                     level=logging.INFO,
+    #                     handlers=handlers
+    #                     )
+    #
+    # logging.info('\n'.join(f'{k}={v}' for k, v in locals().items()))
 
     # ============================= create save dict ==============================================#
     res_dict = {
