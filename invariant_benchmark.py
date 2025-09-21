@@ -309,7 +309,8 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
             table['metric'] += [eval]*len(r)
             table['system'] += full_d['system']
     table['SNR'] = [snr]*len(table['distance'])
-    table['npoints'] = [n]*len(table['distance'])
+    table['npoints'] = [n_points]*len(table['distance'])
+    table['T'] = [t_max]*len(table['distance'])
     pd.DataFrame(table).to_csv(path + name + '.csv')
 
 

@@ -141,7 +141,10 @@ def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: 
         'system': [],
         'true_label': [],
         'method': [],
-        'predicted': []
+        'predicted': [],
+        'SNR': [],
+        'npoints': [],
+        'T': [],
     }
 
     # ============================= load systems ==================================================#
@@ -186,6 +189,9 @@ def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: 
         res_dict['true_label'].append(np.sign(systems[sys_ind].dist_from_bifur()))
         res_dict['method'].append('SPE')
         res_dict['predicted'].append(pred)
+        res_dict['SNR'].append(snr)
+        res_dict['npoints'].append(n_points)
+        res_dict['T'].append(t_max)
 
         # ================================= DSA
         pbar.set_postfix_str('DSA')
@@ -195,7 +201,9 @@ def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: 
         res_dict['true_label'].append(np.sign(systems[sys_ind].dist_from_bifur()))
         res_dict['method'].append('DSA')
         res_dict['predicted'].append(pred)
-
+        res_dict['SNR'].append(snr)
+        res_dict['npoints'].append(n_points)
+        res_dict['T'].append(t_max)
 
         with open(path + f'{job}.pkl', 'wb') as f: pickle.dump(res_dict, f)
 
@@ -205,7 +213,10 @@ def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: 
         'system': [],
         'true_label': [],
         'method': [],
-        'predicted': []
+        'predicted': [],
+        'SNR': [],
+        'npoints': [],
+        'T': [],
     }
 
     for i in range(500):
