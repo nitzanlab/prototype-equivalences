@@ -1,7 +1,7 @@
 from dynamics.systems import SO, VanDerPol, LienardPoly, LienardSigmoid, BZreaction, Selkov, AffineLifting
 from SPE.SPE import NFSmoothOrbital
 from dynamics.prototypes import SOPrototype
-from SPE.SPE import fit_prototype as SPE
+from SPE.SPE import fit_prototype, fit_all_prototypes
 from dynamics.utils import invariant_distribution_error, simulate_trajectory
 from models.baselines import get_NODE, kNN_vectors, fit_SINDy
 
@@ -52,10 +52,10 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 root = ''
 
 config = {
-    'SPE-its': 500,
-    'lr': 1e-3,
+    'SPE-its': 1500,
+    'lr': 5e-4,
     'SOproto': True,
-    'save-plots': True,
+    'save-plots': False,
     'det-reg': 1e-3,
     'weight-decay': 1e-3,
 }
@@ -83,7 +83,8 @@ def eval_estimate(x, xdot, system, model, eval_t, eval_n, dim):
     sys_sim = simulate_trajectory(system, inits, T=eval_t)[-1]
 
     # get distribution of points from the model
-    model_sim = simulate_trajectory(model, inits, T=eval_t)[-1]
+    if isinstance(model, NFSmoothOrbital): model_sim = model.trajectories(inits, T=eval_t)[-1]
+    else: model_sim = simulate_trajectory(model, inits, T=eval_t)[-1]
 
     model_evs = [
         invariant_distribution_error(sys_sim.clone(), model_sim.clone(), distance='swd'),
@@ -111,33 +112,19 @@ def eval_estimate(x, xdot, system, model, eval_t, eval_n, dim):
 
 
 def fit_SPE(x, xdot):
-    models = []
-    losses = []
     protos = PROTOS
     if config['nodes'] == 0: protos = protos[:2]
-    for proto_args in protos:
-        g = SOPrototype(**proto_args)
-        model = NFSmoothOrbital(dim=x.shape[-1], g=g, n_layers=config['n-layers'], K=config['n-freqs'])
-
-        model.to(device)
-        x = x.to(device)
-        xdot = xdot.to(device)
-
-        model, _, loss = SPE(model=model,
-                             x=x,
-                             xdot=xdot,
-                             its=config['SPE-its'],
-                             lr=config['lr'],
-                             det_reg=config['det-reg'],
-                             weight_decay=config['weight-decay'],
+    res = fit_all_prototypes(x.to(device), xdot.to(device), protos,
+                             diffeo_args={'n_layers': config['n-layers'], 'K': config['n-freqs']},
+                             fitting_args={
+                                 'its': config['SPE-its'],
+                                 'lr': config['lr'],
+                                 'det_reg': config['det-reg'],
+                                 'weight_decay': config['weight-decay']
+                             }
                              )
-
-        model.to('cpu')
-        model.requires_grad_(False)
-
-        models.append(model)
-        losses.append(loss)
-    return models[np.argmin(losses)]
+    ind = np.argmin(res['scores'])
+    return res['Hs'][ind]
 
 
 @click.command()
@@ -151,7 +138,7 @@ def fit_SPE(x, xdot):
 @click.option('--t_max',       help='max integration time for simulation', type=float, default=3.)
 @click.option('--eval_t',      help='integration time to use for evaluation', type=float, default=100.)
 @click.option('--eval_n',      help='number of points to use during evaluation', type=int, default=1000)
-@click.option('--nodes',       help='whether nodes are part of the test set', type=int, default=1)
+@click.option('--nodes',       help='whether nodes are part of the test set', type=int, default=0)
 def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
                  n_freqs: int, snr: float, t_max: float, eval_t: float, eval_n: int, nodes: int):
 
@@ -311,7 +298,8 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
     table = {
         'metric': [],
         'method': [],
-        'distance': []
+        'distance': [],
+        'system': []
     }
     for method in METHODS:
         for eval in EVALS:
@@ -319,7 +307,9 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
             table['distance'] += r
             table['method'] += [method]*len(r)
             table['metric'] += [eval]*len(r)
-
+            table['system'] += full_d['system']
+    table['SNR'] = [snr]*len(table['distance'])
+    table['npoints'] = [n]*len(table['distance'])
     pd.DataFrame(table).to_csv(path + name + '.csv')
 
 

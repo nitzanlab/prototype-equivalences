@@ -266,8 +266,8 @@ class FFCoupling(NFModule):
         self.split_dims = split_dims
         x1, x2 = self._split(torch.zeros(1, dim))
 
-        self.a_t = nn.Parameter(1e-3*torch.randn(K, x1.shape[-1], x2.shape[-1]))
-        self.b_t = nn.Parameter(torch.rand(K, x1.shape[-1])*2*np.pi*1e-3)
+        self.a_t = nn.Parameter(torch.randn(K, x1.shape[-1], x2.shape[-1])*1e-3)
+        self.b_t = nn.Parameter(torch.rand(K, x1.shape[-1])*2*np.pi*1e-2)
         self.scale_free = scale_free
         self.R = R
 
@@ -278,7 +278,7 @@ class FFCoupling(NFModule):
             self.register_buffer('a_s', torch.zeros(K, x1.shape[-1], x2.shape[-1]))
             self.register_buffer('b_s', torch.zeros(K, x1.shape[-1]))
         else:
-            self.a_s = nn.Parameter(1e-3*torch.randn(K, x1.shape[-1], x2.shape[-1]))
+            self.a_s = nn.Parameter(torch.randn(K, x1.shape[-1], x2.shape[-1])*1e-3)
             self.b_s = nn.Parameter(torch.rand(K, x1.shape[-1])*2*np.pi*1e-2)
 
     @staticmethod
@@ -417,7 +417,7 @@ class Affine(NFModule):
 
     def logdet(self, x: torch.Tensor) -> torch.Tensor:
         phi = torch.exp(self.phi)
-        return torch.linalg.slogdet(self.W@self.W.T + torch.diag(phi))[1].repeat(x.shape[0])
+        return torch.logdet(self.W@self.W.T + torch.diag(phi)).repeat(x.shape[0])
 
     def jacobian(self, x: torch.Tensor) -> torch.Tensor:
         phi = torch.exp(self.phi)
@@ -532,15 +532,12 @@ class ActNorm(NFModule):
         else:
             self.register_buffer('mu', nn.Parameter(torch.zeros(dim)))
             self.register_buffer('s', nn.Parameter(torch.zeros(dim)))
-        self.register_buffer('start_s', nn.Parameter(torch.zeros(dim)))
-        self.register_buffer('start_mu', nn.Parameter(torch.zeros(dim)))
         self.register_buffer('newinit', torch.ones(1))
         self.scale_init = scale_init
 
     def _newinit(self, x: torch.Tensor):
         self.mu.data = torch.mean(x, dim=0).data
         if self.scale_init: self.s.data = torch.log(torch.std(x, dim=0).data + 1e-3)
-        self.start_s.data = self.s.data
         self.newinit.data[:] = 0
 
     def logdet(self, x: torch.Tensor) -> torch.Tensor:
@@ -702,14 +699,21 @@ class Diffeo(NFModule):
         super().__init__()
 
         layers = []
-        if logtransf: layers.append(LogTransf())
-        if latent_dim is not None:
+
+        if logtransf: layers.append(LogTransf())  # add a transformation to log space
+
+        if latent_dim is not None:   # add a dimensionality reduction
             layers.append(DimReduction(dim=dim, latent=latent_dim))
             dim = latent_dim
-        if actnorm: layers.append(ActNorm(dim, learnable=True))
-        layers.append(Affine(dim=dim, rank=dim))
-        if n_householder > 0:
+
+        if actnorm: layers.append(ActNorm(dim, learnable=False))  # add an initial actnorm layer
+
+        layers.append(Affine(dim=dim, rank=dim))  # first affine trasnformation
+
+        if n_householder > 0:  # add householder transformations which can rotate space
             for i in range(n_householder): layers.append(HouseholderTransf(dim))
+
+        # create all blocks
         for i in range(n_layers):
             layers.append(Affine(dim=dim, rank=rank))
 

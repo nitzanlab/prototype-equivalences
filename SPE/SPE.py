@@ -51,7 +51,8 @@ class NFSmoothOrbital(SPEModel):
         self.g = g
         self.H = Diffeo(dim=dim, **NF_kwargs)
         self.dim = dim
-        if 'latent_dim' in NF_kwargs: self.dim = NF_kwargs['latent_dim']
+        self.latent_dim = dim
+        if 'latent_dim' in NF_kwargs: self.latent_dim = NF_kwargs['latent_dim']
 
     def logdet(self, x: torch.Tensor):
         return self.H.logdet(x)
@@ -65,10 +66,15 @@ class NFSmoothOrbital(SPEModel):
         return self.H.inv_jvp(y, self.g(y))
 
     def get_invariant(self, N: int):
-        return self.H.reverse(self.g.get_invariant(N, self.dim))
+        return self.H.reverse(self.g.get_invariant(N, self.latent_dim))
 
     def project_onto_invariant(self, x: torch.Tensor) -> torch.Tensor:
         return self.H.reverse(self.g.project_onto_invariant(x))
+
+    def trajectories(self, init: torch.Tensor, T: float = 10., step: float = 5e-2, euler: bool = False):
+        init = self.H.forward(init)
+        traj = self.g.trajectories(init, T=T, step=step, euler=euler)
+        return self.H.reverse(traj.reshape(-1, self.latent_dim)).reshape(traj.shape[0], traj.shape[1], -1)
 
 
 # a default set of archetypes that can be used; these are the archetypes used for all 2D tests
@@ -134,9 +140,8 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
     for i in pbar:
         optim.zero_grad()
 
-        ldet = model.logdet(x)
-        pred = model.forward(x)
-        mseloss = torch.mean(equiv_err(pred, xdot))  # calculate the error according to the equivalence
+        gHx, dHxdot, ldet = model.loss_terms(x, xdot)
+        mseloss = torch.mean(equiv_err(gHx, dHxdot))  # calculate the error according to the equivalence
 
         dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
         ploss = proj_loss(x, model, proj_reg)  # adds loss for projection
@@ -152,10 +157,9 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
 
     # ========================== calculate final losses for everything =================================================
     with torch.no_grad():
-        ploss = proj_loss(x, model, proj_reg)  # adds loss for projection
-        ldet = model.logdet(x)
-        pred = model.forward(x)
-        err = torch.mean(equiv_err(pred, xdot))
+        gHx, dHxdot, ldet = model.loss_terms(x, xdot)
+        err = torch.mean(equiv_err(gHx, dHxdot))
+        ploss = proj_loss(x, model, proj_reg)
     dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
 
     score = torch.mean(err).item()
@@ -165,13 +169,14 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
     return model, loss, score
 
 
-def fit_all_prototypes(x: torch.Tensor, xdot: torch.Tensor, prototypes: Iterable=_default_prototypes,
-                       diffeo_args: dict=dict(), **fitting_args: dict) -> dict:
+def fit_all_prototypes(x: torch.Tensor, xdot: torch.Tensor, prototypes: Iterable=_default_prototypes, to_cpu: bool=True,
+                       diffeo_args: dict=dict(), fitting_args: dict=dict()) -> dict:
     """
     A wrapper function that fits the given observations, x and xdot, to the list of supplied dynamics
     :param x: the positions of the observations, a torch tensor with shape [N, dim]
     :param xdot: the vectors associated with the above positions, a torch tensor with shape [N, dim]
     :param prototypes: a list of Prototype classes, which are the dynamics to use
+    :param to_cpu: a boolean indicating whether all models should be returned to CPU after training
     :param diffeo_args: dictionary of named arguments to pass on when initializing the diffeomorphism (all except
                         dimension, which is automatically set); these arguments are:
                             - rank: the rank used in the Affine transformations
@@ -198,20 +203,28 @@ def fit_all_prototypes(x: torch.Tensor, xdot: torch.Tensor, prototypes: Iterable
                           these Hs are returned as SPE.models.SPEModel objects
     """
     results = {
-        'dynamics': prototypes,
+        'prototypes': prototypes,
         'losses': [],
         'ldets': [],
         'scores': [],
         'Hs': []
     }
 
-    for (a, omega, decay) in prototypes:
-        g = SOPrototype(a=a, omega=omega, decay=decay, optimize=False)
+    device = x.device
+
+    for proto in prototypes:
+        if not isinstance(proto, Prototype):
+            g = SOPrototype(**proto)
+        else:
+            g = proto
         H = NFSmoothOrbital(dim=x.shape[1], g=g, **diffeo_args)
-        H, loss, ldet, score = fit_prototype(H, x, xdot, **fitting_args)
+
+        H.to(device)
+        H, loss, score = fit_prototype(H, x.clone(), xdot.clone(), **fitting_args)
+        H.requires_grad_(False)
+        if to_cpu: H.to('cpu')
 
         results['losses'].append(loss)
-        results['ldets'].append(ldet)
         results['scores'].append(score)
         results['Hs'].append(H)
 
