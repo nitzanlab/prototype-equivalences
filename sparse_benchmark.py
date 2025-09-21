@@ -112,7 +112,7 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
                  n_freqs: int, snr: float, t_max: float, eval_t: float, eval_n: int, nodes: int):
 
     # ============================= define paths ==================================================#
-    path_root = root + f'results/invariant_dim={dim}/'
+    path_root = root + f'results/sparse_classify_dim={dim}/'
     name = (
         f'npoints={n_points}_'
         f'SNR={snr:.2f}_'
@@ -205,15 +205,6 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
         res_dict['method'].append('DSA')
         res_dict['predicted'].append(pred)
 
-        # ================================= save everything
-        if config['save-plots']:
-            try:
-                plt.tight_layout()
-                plt.savefig(path + f'{job}-{sys_ind}.png')
-            except:
-                print('\n\nmatplotlib failed\n\n')
-
-        plt.close('all')
 
         with open(path + f'{job}.pkl', 'wb') as f: pickle.dump(res_dict, f)
 
