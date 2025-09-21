@@ -51,13 +51,11 @@ root = ''
 
 config = {
     'SPE-its': 500,
-    'lr': 5e-3,
-    'SOproto': True,
-    'save-plots': True,
+    'lr': 1e-3,
     'det-reg': 1e-3,
     'weight-decay': 1e-3,
-    'DSA-its': 1000,
-    'DSA-step': 1e-2,
+    'DSA-its': 5000,
+    'DSA-step': 1e-3,
 
 }
 
@@ -81,31 +79,32 @@ def SPE_classify(x, xdot):
                                      'weight_decay': config['weight-decay'],
                                  }
                                  )
-    return np.array([[a, omega, results['scores'][i]] for i, (a, omega) in enumerate(PROTOS)])
+    return np.array([[proto['a'], proto['omega'], results['scores'][i]] for i, proto in enumerate(PROTOS)])
 
 
 def DSA_classify(x, xdot):
     X = torch.cat([x[:, None], x[:, None] + config['DSA-step']*xdot[:, None]], dim=1)
     rets = []
-    for (a, omega) in PROTOS:
-        s = SOPrototype(a=a, omega=omega)
-        Y = s.trajectories(x, T=3).transpose(0, 1)
+    for proto in PROTOS:
+        s = SOPrototype(a=proto['a'], omega=proto['omega'])
+        Y = s.trajectories(x, T=5).transpose(0, 1)
         score = DSA(X, Y, iters=config['DSA-its']).fit_score()
-        rets.append([a, omega, score])
+        rets.append([proto['a'], proto['omega'], score])
 
     return np.array(rets)
 
 
 @click.command()
 @click.option('--n',           help='number of systems to fit', type=int, default=5)
+@click.option('--its',         help='number of iterations to train SPE', type=int, default=500)
 @click.option('--job',         help='job number (used for parallelization)', type=int, default=0)
 @click.option('--n_points',    help='number of points to sample', type=int, default=100)
 @click.option('--dim',         help='dimension of the data', type=int, default=2)
-@click.option('--n_layers',    help='number of layers in models', type=int, default=4)
+@click.option('--n_layers',    help='number of layers in models', type=int, default=1)
 @click.option('--n_freqs',     help='number of frequencies in coupling', type=int, default=5)
 @click.option('--snr',         help='Signal to noise ratio in observed velocities', type=float, default=5.)
 @click.option('--t_max',       help='max integration time for simulation', type=float, default=3.)
-def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
+def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: int,
                  n_freqs: int, snr: float, t_max: float):
 
     # ============================= define paths ==================================================#
@@ -115,6 +114,7 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
         f'SNR={snr:.2f}_'
         f'layers={n_layers}_'
         f'freqs={n_freqs}_'
+        f'its={its}_'
         f'T={t_max:.2f}'
     )
     path = path_root + name + '/'
@@ -123,6 +123,7 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
     global config
     config['n-layers'] = n_layers
     config['n-freqs'] = n_freqs
+    config['SPE-its'] = its
 
     # ============================= logging =======================================================#
     # write all hyperparameters to a file
