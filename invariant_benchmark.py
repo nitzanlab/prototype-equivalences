@@ -52,8 +52,8 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 root = ''
 
 config = {
-    'SPE-its': 1500,
-    'lr': 5e-4,
+    'SPE-its': 1000,
+    'lr': 1e-3,
     'SOproto': True,
     'save-plots': False,
     'det-reg': 1e-3,
