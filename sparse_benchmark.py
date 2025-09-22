@@ -103,7 +103,7 @@ def DSA_classify(x, xdot):
 @click.option('--n_freqs',     help='number of frequencies in coupling', type=int, default=5)
 @click.option('--snr',         help='Signal to noise ratio in observed velocities', type=float, default=5.)
 @click.option('--t_max',       help='max integration time for simulation', type=float, default=3.)
-@click.option('--rff',         help='whether to use RFFCoupling instead of FFCoupling', type=int, default=1)
+@click.option('--rff',         help='whether to use RFFCoupling instead of FFCoupling', type=int, default=0)
 def classify_all(n: int, its: int, lr: float, job: int, n_points: int, dim: int, n_layers: int,
                  n_freqs: int, snr: float, t_max: float, rff: int):
 

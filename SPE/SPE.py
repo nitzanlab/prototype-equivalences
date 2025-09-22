@@ -153,7 +153,6 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
     params = list(model.parameters())
 
     # setup all of the needed options for projection regularization
-    if x.shape[-1]==2: proj_reg = None
     if proj_reg is not None:
         proj_reg = torch.ones(1, device=x.device)*proj_reg
         proj_reg.requires_grad = True

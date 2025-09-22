@@ -44,8 +44,8 @@ SYSTEMS = [SO, LienardPoly, LienardSigmoid, VanDerPol, BZreaction, Selkov]
 PROTOS = [
     {'a': .25, 'omega': .5},
     {'a': .25, 'omega': -.5},
-    {'a': -.25, 'omega': .5},
-    {'a': -.25, 'omega': -.5},
+    # {'a': -.25, 'omega': .5},
+    # {'a': -.25, 'omega': -.5},
 ]
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -111,7 +111,7 @@ def eval_estimate(x, xdot, system, model, eval_t, eval_n, dim):
 
 def fit_SPE(x, xdot):
     protos = PROTOS
-    if config['nodes'] == 0: protos = protos[:2]
+    # if config['nodes'] == 0: protos = protos[:2]
     res = fit_all_prototypes(x.to(device), xdot.to(device), protos,
                              diffeo_args={'n_layers': config['n-layers'],
                                           'K': config['n-freqs'], 'RFF': config['RFF']},
@@ -141,8 +141,7 @@ def fit_SPE(x, xdot):
 @click.option('--eval_n',      help='number of points to use during evaluation', type=int, default=1000)
 @click.option('--rff',         help='whether to use RFFCoupling instead of FFCoupling', type=int, default=0)
 def classify_all(n: int, job: int, its: int, lr: float, n_points: int, dim: int, n_layers: int,
-                 n_freqs: int, snr: float, t_max: float, eval_t: float, eval_n: int,
-                 rff: int):
+                 n_freqs: int, snr: float, t_max: float, eval_t: float, eval_n: int, rff: int):
 
     # ============================= define paths ==================================================#
     path_root = root + f'results/invariant_dim={dim}/'
@@ -189,14 +188,9 @@ def classify_all(n: int, job: int, its: int, lr: float, n_points: int, dim: int,
     torch.manual_seed(job)
     np.random.seed(job)
     ks = np.random.choice(len(SYSTEMS), n)
-    if nodes==0:
-        systems = [
-            SYSTEMS[i](**SYSTEMS[i].random_cycle_params()) for i in ks
-        ]
-    else:
-        systems = [
-            SYSTEMS[i]() for i in ks
-        ]
+    systems = [
+        SYSTEMS[i](**SYSTEMS[i].random_cycle_params()) for i in ks
+    ]
 
     if dim > 2:
         systems = [
