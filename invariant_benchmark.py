@@ -52,8 +52,6 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 root = ''
 
 config = {
-    'SPE-its': 1000,
-    'lr': 1e-3,
     'SOproto': True,
     'save-plots': False,
     'det-reg': 1e-3,
@@ -131,6 +129,8 @@ def fit_SPE(x, xdot):
 @click.command()
 @click.option('--n',           help='number of systems to fit', type=int, default=5)
 @click.option('--job',         help='job number (used for parallelization)', type=int, default=0)
+@click.option('--its',         help='number of iterations to fit SPE', type=int, default=1000)
+@click.option('--lr',          help='learning rate for fitting SPE', type=float, default=1e-3)
 @click.option('--n_points',    help='number of points to sample', type=int, default=100)
 @click.option('--dim',         help='dimension of the data', type=int, default=2)
 @click.option('--n_layers',    help='number of layers in models', type=int, default=4)
@@ -139,10 +139,9 @@ def fit_SPE(x, xdot):
 @click.option('--t_max',       help='max integration time for simulation', type=float, default=3.)
 @click.option('--eval_t',      help='integration time to use for evaluation', type=float, default=100.)
 @click.option('--eval_n',      help='number of points to use during evaluation', type=int, default=1000)
-@click.option('--nodes',       help='whether nodes are part of the test set', type=int, default=0)
 @click.option('--rff',         help='whether to use RFFCoupling instead of FFCoupling', type=int, default=0)
-def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
-                 n_freqs: int, snr: float, t_max: float, eval_t: float, eval_n: int, nodes: int,
+def classify_all(n: int, job: int, its: int, lr: float, n_points: int, dim: int, n_layers: int,
+                 n_freqs: int, snr: float, t_max: float, eval_t: float, eval_n: int,
                  rff: int):
 
     # ============================= define paths ==================================================#
@@ -152,8 +151,8 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
         f'SNR={snr:.2f}_'
         f'layers={n_layers}_'
         f'freqs={n_freqs}_'
+        f'its={its}_'
         f'T={t_max:.2f}'
-        f'{"_nodes" if nodes==1 else ""}'
         f'{"_RFF" if rff==1 else ""}'
     )
     path = path_root + name + '/'
@@ -162,8 +161,10 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
     global config
     config['n-layers'] = n_layers
     config['n-freqs'] = n_freqs
-    config['nodes'] = nodes
+    config['nodes'] = 0
     config['RFF'] = rff==1
+    config['SPE-its'] = its
+    config['lr'] = lr
 
     # ============================= logging =======================================================#
     # write all hyperparameters to a file

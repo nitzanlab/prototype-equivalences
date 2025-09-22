@@ -50,8 +50,6 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 root = ''
 
 config = {
-    'SPE-its': 500,
-    'lr': 1e-3,
     'det-reg': 1e-3,
     'weight-decay': 1e-3,
     'DSA-its': 5000,
@@ -97,6 +95,7 @@ def DSA_classify(x, xdot):
 @click.command()
 @click.option('--n',           help='number of systems to fit', type=int, default=5)
 @click.option('--its',         help='number of iterations to train SPE', type=int, default=500)
+@click.option('--lr',          help='learning rate for SPE', type=float, default=1e-3)
 @click.option('--job',         help='job number (used for parallelization)', type=int, default=0)
 @click.option('--n_points',    help='number of points to sample', type=int, default=100)
 @click.option('--dim',         help='dimension of the data', type=int, default=2)
@@ -105,7 +104,7 @@ def DSA_classify(x, xdot):
 @click.option('--snr',         help='Signal to noise ratio in observed velocities', type=float, default=5.)
 @click.option('--t_max',       help='max integration time for simulation', type=float, default=3.)
 @click.option('--rff',         help='whether to use RFFCoupling instead of FFCoupling', type=int, default=1)
-def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: int,
+def classify_all(n: int, its: int, lr: float, job: int, n_points: int, dim: int, n_layers: int,
                  n_freqs: int, snr: float, t_max: float, rff: int):
 
     # ============================= define paths ==================================================#
@@ -126,6 +125,7 @@ def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: 
     config['n-layers'] = n_layers
     config['n-freqs'] = n_freqs
     config['SPE-its'] = its
+    config['lr'] = lr
     config['RFF'] = rff==1
 
     # ============================= logging =======================================================#
