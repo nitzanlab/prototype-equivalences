@@ -115,7 +115,8 @@ def fit_SPE(x, xdot):
     protos = PROTOS
     if config['nodes'] == 0: protos = protos[:2]
     res = fit_all_prototypes(x.to(device), xdot.to(device), protos,
-                             diffeo_args={'n_layers': config['n-layers'], 'K': config['n-freqs']},
+                             diffeo_args={'n_layers': config['n-layers'],
+                                          'K': config['n-freqs'], 'RFF': config['RFF']},
                              fitting_args={
                                  'its': config['SPE-its'],
                                  'lr': config['lr'],
@@ -139,8 +140,10 @@ def fit_SPE(x, xdot):
 @click.option('--eval_t',      help='integration time to use for evaluation', type=float, default=100.)
 @click.option('--eval_n',      help='number of points to use during evaluation', type=int, default=1000)
 @click.option('--nodes',       help='whether nodes are part of the test set', type=int, default=0)
+@click.option('--rff',         help='whether to use RFFCoupling instead of FFCoupling', type=int, default=0)
 def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
-                 n_freqs: int, snr: float, t_max: float, eval_t: float, eval_n: int, nodes: int):
+                 n_freqs: int, snr: float, t_max: float, eval_t: float, eval_n: int, nodes: int,
+                 rff: int):
 
     # ============================= define paths ==================================================#
     path_root = root + f'results/invariant_dim={dim}/'
@@ -151,6 +154,7 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
         f'freqs={n_freqs}_'
         f'T={t_max:.2f}'
         f'{"_nodes" if nodes==1 else ""}'
+        f'{"_RFF" if rff==1 else ""}'
     )
     path = path_root + name + '/'
     Path(path).mkdir(parents=True, exist_ok=True)
@@ -159,6 +163,7 @@ def classify_all(n: int, job: int, n_points: int, dim: int, n_layers: int,
     config['n-layers'] = n_layers
     config['n-freqs'] = n_freqs
     config['nodes'] = nodes
+    config['RFF'] = rff==1
 
     # ============================= logging =======================================================#
     # write all hyperparameters to a file

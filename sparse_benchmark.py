@@ -70,7 +70,7 @@ HEIGHT, WIDTH = 2, 4
 def SPE_classify(x, xdot):
     results = fit_all_prototypes(x=x, xdot=xdot, prototypes=PROTOS,
                                  diffeo_args={'n_layers': config['n-layers'],
-                                              'K': config['n-freqs'],
+                                              'K': config['n-freqs'], 'RFF': config['RFF']
                                               },
                                  fitting_args={
                                      'its': config['SPE-its'],
@@ -104,8 +104,9 @@ def DSA_classify(x, xdot):
 @click.option('--n_freqs',     help='number of frequencies in coupling', type=int, default=5)
 @click.option('--snr',         help='Signal to noise ratio in observed velocities', type=float, default=5.)
 @click.option('--t_max',       help='max integration time for simulation', type=float, default=3.)
+@click.option('--rff',         help='whether to use RFFCoupling instead of FFCoupling', type=int, default=1)
 def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: int,
-                 n_freqs: int, snr: float, t_max: float):
+                 n_freqs: int, snr: float, t_max: float, rff: int):
 
     # ============================= define paths ==================================================#
     path_root = root + f'results/sparse_classify_dim={dim}/'
@@ -116,6 +117,7 @@ def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: 
         f'freqs={n_freqs}_'
         f'its={its}_'
         f'T={t_max:.2f}'
+        f'{"_RFF" if rff==1 else ""}'
     )
     path = path_root + name + '/'
     Path(path).mkdir(parents=True, exist_ok=True)
@@ -124,6 +126,7 @@ def classify_all(n: int, its: int, job: int, n_points: int, dim: int, n_layers: 
     config['n-layers'] = n_layers
     config['n-freqs'] = n_freqs
     config['SPE-its'] = its
+    config['RFF'] = rff==1
 
     # ============================= logging =======================================================#
     # # write all hyperparameters to a file
