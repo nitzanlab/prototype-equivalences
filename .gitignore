@@ -179,3 +179,9 @@ tmp/
 cache/
 .DS_Store
 *.ipynb
+*.pdf
+*.PDF
+*.png
+*.PNG
+*.jpg
+*.JPG

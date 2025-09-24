@@ -129,7 +129,7 @@ def fit_SPE(x, xdot):
 @click.command()
 @click.option('--n',           help='number of systems to fit', type=int, default=5)
 @click.option('--job',         help='job number (used for parallelization)', type=int, default=0)
-@click.option('--its',         help='number of iterations to fit SPE', type=int, default=1000)
+@click.option('--its',         help='number of iterations to fit SPE', type=int, default=500)
 @click.option('--lr',          help='learning rate for fitting SPE', type=float, default=1e-3)
 @click.option('--n_points',    help='number of points to sample', type=int, default=100)
 @click.option('--dim',         help='dimension of the data', type=int, default=2)
