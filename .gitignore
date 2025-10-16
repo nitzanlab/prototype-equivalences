@@ -185,3 +185,6 @@ cache/
 *.PNG
 *.jpg
 *.JPG
+*.zip
+*.lyx
+*.lyx~

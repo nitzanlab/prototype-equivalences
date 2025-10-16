@@ -194,7 +194,7 @@ class MLPCoupling(nn.Module):
             layers += [nn.Linear(K, K), activation()]
         layers.append(nn.Linear(K, x2.shape[-1]))
         self.s = nn.Sequential(*layers)
-        for param in self.s.parameters(): param.data = 1e-3*torch.randn_like(param.data)
+        for param in self.s.parameters(): param.data = 1e-5*torch.randn_like(param.data)
 
         layers = [nn.Linear(x1.shape[-1], K), activation()]
         for i in range(depth - 1):
@@ -247,9 +247,9 @@ class MLPCoupling(nn.Module):
 
     def _Jf(self, x1: torch.Tensor, x2: torch.Tensor, f: torch.Tensor):
         f1, f2 = self._split(f.clone())
-        x = torch.clone(x1).requires_grad_(True)
-        jf1 = torch.func.jvp(lambda x: self.s(x)*x2+self.t(x), (x, ), (f1, ))[1]
-        return self._cat(f1, jf1 + self.s(x)*f2)
+        xd = torch.clone(x1).requires_grad_(True)
+        jf1 = torch.func.jvp(lambda x: self.s(x)*x2+self.t(x), (xd, ), (f1, ))[1]
+        return self._cat(f1, jf1 + self.s(xd)*f2)
 
     def jvp_forward(self, x: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """

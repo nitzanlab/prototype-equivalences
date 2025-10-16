@@ -111,9 +111,11 @@ def proj_loss(x, model, proj_var, proj_dim: int=2):
     # define the loss related to how far the projection is from the true points
     if proj_var is None: return 0
     projLL = .5*x.shape[1]*proj_var
-    y = model.forward(x)
-    yproj = torch.cat([y[:, :proj_dim], torch.zeros(y.shape[0], y.shape[1]-proj_dim, device=y.device)], dim=-1)
-    return torch.exp(proj_var)*torch.mean((model.reverse(yproj) - x)**2) - proj_dim*projLL/(x.shape[0]*x.shape[1])
+    # y = model.forward(x)
+    # yproj = torch.cat([y[:, :proj_dim], torch.zeros(y.shape[0], y.shape[1]-proj_dim, device=y.device)], dim=-1)
+    # diff = torch.mean((model.reverse(yproj) - x)**2)
+    diff = torch.mean((model.project_onto_invariant(x) - x)**2)
+    return torch.exp(proj_var)*diff - proj_dim*projLL/(x.shape[0]*x.shape[1])
 
 
 def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int=300,
@@ -320,7 +322,6 @@ def fit_all_prototypes(x: torch.Tensor, xdot: torch.Tensor, prototypes: Iterable
     results = {
         'prototypes': prototypes,
         'losses': [],
-        'ldets': [],
         'scores': [],
         'Hs': []
     }
