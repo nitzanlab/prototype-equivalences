@@ -339,7 +339,8 @@ class FFCoupling(nn.Module):
         :return: the transformed input x, a tensor with shape [N, dim_out]
         """
         freqs = torch.arange(0, gamma.shape[0], device=x.device)*2*np.pi/R
-        return torch.sum(torch.cos(freqs[None, :, None]*x[:, None] + phi[None])[..., None] * gamma[None], dim=(1, -2))
+        # return torch.sum(torch.cos(freqs[None, :, None]*x[:, None] + phi[None])[..., None] * gamma[None], dim=(1, -2))
+        return torch.sum(torch.sin(freqs[None, :, None]*x[:, None] + phi[None])[..., None] * gamma[None], dim=(1, -2))
 
     @staticmethod
     def _df(x: torch.Tensor, gamma: torch.Tensor, phi: torch.Tensor, R: float) -> torch.Tensor:
@@ -351,7 +352,8 @@ class FFCoupling(nn.Module):
         :return: the Jacobian of the FF function, with shape [N, dim_in, dim_out]
         """
         freqs = torch.arange(0, gamma.shape[0], device=x.device)*2*np.pi/R
-        sins = - freqs[None, :, None]*torch.sin(freqs[None, :, None]*x[:, None] + phi[None])  # [N, K, dim_in]
+        # sins = - freqs[None, :, None]*torch.sin(freqs[None, :, None]*x[:, None] + phi[None])  # [N, K, dim_in]
+        sins = freqs[None, :, None]*torch.cos(freqs[None, :, None]*x[:, None] + phi[None])  # [N, K, dim_in]
         return torch.sum(sins[..., None]*gamma[None], dim=1)  # [N, dim_in, dim_out]
 
     def _s(self, x1: torch.Tensor, rev: bool=False) -> torch.Tensor:
