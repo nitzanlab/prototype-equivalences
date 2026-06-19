@@ -620,8 +620,6 @@ class HouseholderTransf(nn.Module):
         return self.__transform(y), self.__transform(f)
 
 
-
-
 class OrthoSylvester(nn.Module):
     """
     Implementation of orthogonal Sylvester flow (https://arxiv.org/pdf/1803.05649)
@@ -812,7 +810,7 @@ class Diffeo(nn.Module):
 
         if actnorm: layers.append(ActNorm(dim))   # an invertible z-scoring of the data
 
-        if sylvester and dim>2: layers.append(OrthoSylvester(dim=dim))   # an orthonormal transformation of the data
+        if sylvester: layers.append(OrthoSylvester(dim=dim))   # an orthonormal transformation of the data
 
         if full_affine:
             layers.append(Affine(dim=dim, rank=dim))

@@ -1,5 +1,5 @@
 from dynamics.systems import SO, VanDerPol, LienardPoly, LienardSigmoid, BZreaction, Selkov, AffineLifting
-from SPE.SPE import NFSmoothOrbital
+from SPE.SPE import SPEModel
 from dynamics.prototypes import SOPrototype
 from SPE.SPE import fit_prototype, fit_all_prototypes
 from dynamics.utils import invariant_distribution_error, simulate_trajectory
@@ -81,7 +81,7 @@ def eval_estimate(x, xdot, system, model, eval_t, eval_n, dim):
     sys_sim = simulate_trajectory(system, inits, T=eval_t)[-1]
 
     # get distribution of points from the model
-    if isinstance(model, NFSmoothOrbital): model_sim = model.trajectories(inits, T=eval_t)[-1]
+    if isinstance(model, SPEModel): model_sim = model.trajectories(inits, T=eval_t)[-1]
     else: model_sim = simulate_trajectory(model, inits, T=eval_t)[-1]
 
     model_evs = [

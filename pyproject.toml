@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prototype-equivalences"
+version = "0.1.0"
+description = "Smooth Prototype Equivalences for characterizing nonlinear dynamics"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0.1",
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "tqdm",
+    "POT",
+]
+
+[project.urls]
+Repository = "https://github.com/nitzanlab/prototype-equivalences"
+
+[tool.setuptools.packages.find]
+where = ["src"]

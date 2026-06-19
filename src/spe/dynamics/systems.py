@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from .utils import get_oscillator, simulate_trajectory,\
     cartesian_to_polar, polar_derivative_to_cartesian_derivative
-from models.NFDiffeo import FFCoupling, NFCompose
+from ..models.NFDiffeo import FFCoupling, NFCompose
 
 
 class PhaseSpace:
@@ -386,6 +386,7 @@ class Selkov(PhaseSpace):
         f_plus = np.sqrt(1 / 2 * (1 - 2 * a + np.sqrt(1 - 8 * a)))
         f_minus = np.sqrt(1 / 2 * (1 - 2 * a - np.sqrt(1 - 8 * a)))
         return 1 if f_minus <= b <= f_plus else -1
+
 
 class SupercriticalHopf(PhaseSpace):
     """
