@@ -188,3 +188,4 @@ cache/
 *.zip
 *.lyx
 *.lyx~
+/documents/

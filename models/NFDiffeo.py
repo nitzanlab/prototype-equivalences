@@ -81,14 +81,9 @@ class RFFCoupling(nn.Module):
         self.b_s.requires_grad = not freeze
         self.g_s.requires_grad = not freeze
 
-    def rand_init(self, amnt: float):
-        """
-        Random initialization of the layer
-        :param amnt: a float with the strength of the initialization
-        """
-        self.W_t.data = torch.randn_like(self.W_t)*amnt
-        self.b_t.data = torch.randn_like(self.b_t)*amnt
-        self.g_t.data = torch.randn_like(self.g_t)*amnt
+        self.W_t.requires_grad = not freeze
+        self.b_t.requires_grad = not freeze
+        self.g_t.requires_grad = not freeze
 
     def logdet(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -475,60 +470,6 @@ class FFCoupling(nn.Module):
         return x, Jf
 
 
-class DimReduction(nn.Module):
-
-    def __init__(self, dim: int, latent: int):
-        super().__init__()
-        self.dim = dim
-        self.latent = latent
-        self.A = nn.Parameter(torch.rand(dim, latent)/dim)
-        self.m = nn.Parameter(torch.rand(dim)/dim)
-        self.register_buffer('inited', torch.tensor([0.]))
-
-    def init_(self, x: torch.Tensor):
-        """
-        Fit the dimension reduction as a PCA. If xdot is also supplied, then the MLE transformation assuming a node
-        attractor is fit
-        :param x: the training data, a tensor with shape [N, dim]
-        """
-        self.m.data = x.mean(dim=0)
-        m = x-self.m[None]
-        u, _, _ = torch.linalg.svd(m.T)  # calculate SVD
-        self.A.data = u[:, :self.latent]
-        self.inited.data[:] = 1
-
-    def freeze_scale(self, freeze: bool=True):
-        """
-        Freeze all parameters that impact log-determinant
-        :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
-        """
-        pass
-
-    def project(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Projected the samples onto the hyperplane
-        :param x: the training data, a tensor with shape [N, dim]
-        :return: the projected data, a tensor with shape [N, dim]
-        """
-        return x@self.A@self.A.T
-
-    def logdet(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.logdet(self.A.T@self.A)[None]
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.inited[0] != 1: self.init_(x)
-        return (x-self.m[None])@self.A
-
-    def jvp_forward(self, x: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return self.forward(x), f@self.A, self.logdet(x)
-
-    def reverse(self, y: torch.Tensor) -> torch.Tensor:
-        return torch.linalg.lstsq(self.A.T, y.T)[0].T + self.m[None]
-
-    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self.reverse(y), torch.linalg.lstsq(self.A.T, f.T)[0].T
-
-
 class Affine(nn.Module):
     """
     An affine transformation module of a normalizing flow. To ensure invertibility, this transformation is defined as:
@@ -583,44 +524,6 @@ class Affine(nn.Module):
         M = self.W @ self.W.T + torch.diag_embed(phi)
         m = y - self.mu[None]
         return torch.linalg.solve(M, m.T).T, torch.linalg.solve(M, f.T).T
-
-
-class LogTransf(nn.Module):
-
-    def __init__(self, precision: float=1e-4):
-        super().__init__()
-        self.prec = precision
-
-    def freeze_scale(self, freeze: bool = True):
-        """
-        Freeze all parameters that impact log-determinant
-        :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
-        """
-        pass
-
-    def logdet(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.sum(-torch.log(x+self.prec), dim=-1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.log(x+self.prec)
-
-    def jvp_forward(self, x: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return torch.log(x+self.prec), f/(x+self.prec), self.logdet(x)
-
-    def reverse(self, y: torch.Tensor) -> torch.Tensor:
-        return torch.exp(y)-self.prec
-
-    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
-        :param y: a torch tensor with shape [N, dim] where N is the number of points
-        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
-                  number of points
-        :return: the tuple (x, inv(J)f, logdet) where:
-                    - y: a torch tensor with shape [N, dim], which are the transformed ys
-                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
-        """
-        return torch.exp(y)-self.prec, torch.exp(y)*f
 
 
 class ActNorm(nn.Module):
@@ -689,13 +592,6 @@ class HouseholderTransf(nn.Module):
         """
         pass
 
-    def rand_init(self, amnt: float):
-        """
-        Random initialization of the layer
-        :param amnt: a float with the strength of the initialization
-        """
-        raise NotImplementedError
-
     def logdet(self, x: torch.Tensor) -> torch.Tensor:
         return 0
 
@@ -724,6 +620,124 @@ class HouseholderTransf(nn.Module):
         return self.__transform(y), self.__transform(f)
 
 
+
+
+class OrthoSylvester(nn.Module):
+    """
+    Implementation of orthogonal Sylvester flow (https://arxiv.org/pdf/1803.05649)
+    """
+
+    def __init__(self, dim: int, n_steps: int=30, prec: float=1e-5):
+        """
+        :param dim: dimensionality of the data
+        :param n_steps: number of steps taken in order to project the transformation into an orthonormal one
+        :param prec: precision parameter to stop orthogonalization iterations
+        """
+        super().__init__()
+        self.Q = nn.Parameter(torch.randn(dim, dim)*1e-3)
+        self.n_steps = n_steps
+        self.dim = dim
+        self.prec = prec
+        self.register_buffer('Q_center', torch.eye(dim))
+
+    def _Q(self):
+        Q = self.Q + self.Q_center  # Q is the perturbation from the center
+        Q = Q + 1e-6*torch.eye(self.dim, device=Q.device)  # numerical stability
+        if torch.isnan(Q).any(): raise AssertionError('Affine transformation is nan')
+        I = torch.eye(self.dim, device=Q.device)
+        norm = torch.norm(Q.T@Q - I)
+        if norm >= 1:
+            with torch.no_grad():
+                normalization = max(torch.max(Q).item()*Q.shape[0],
+                                    torch.max(torch.sum(torch.abs(Q), dim=0)).item()*np.sqrt(Q.shape[0]))
+            Q = Q/normalization
+            # raise AssertionError('Distance of affine transformation from orthogonal too big')
+        if torch.isnan(Q).any(): raise AssertionError('Affine transformation is nan')
+        if norm > self.prec:
+            for i in range(self.n_steps):
+                P = I - Q.T@Q
+                with torch.no_grad():
+                    if torch.norm(P) <= self.prec: break
+                Q = Q@(I + .5*P)
+        if not self.training: self.Q.data = Q - self.Q_center  # Q is the perturbation from the centering
+        if torch.isnan(Q).any(): raise AssertionError('Affine transformation is nan')
+        return Q
+
+    def freeze_scale(self, freeze: bool = True):
+        """
+        Freeze all parameters that impact log-determinant
+        :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
+        """
+        pass
+
+    def logdet(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.zeros_like(x[:, 0])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        Q = self._Q()
+        return x@Q
+
+    def jvp_forward(self, x: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        Q = self._Q()
+        return x@Q, f@Q, self.logdet(x)
+
+    def reverse(self, y: torch.Tensor) -> torch.Tensor:
+        Q = self._Q()
+        return y@Q.T
+
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        Q = self._Q()
+        return y@Q.T, f@Q.T
+
+
+class ScaleTransf(nn.Module):
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self.mu = nn.Parameter(torch.randn(dim)*1e-4)
+        self.s = nn.Parameter(torch.randn(dim)*1e-4)
+
+    def freeze_scale(self, freeze: bool = True):
+        """
+        Freeze all parameters that impact log-determinant
+        :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
+        """
+        pass
+
+    def logdet(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.sum(-self.s)[None]
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.exp(-self.s)[None]*(x-self.mu[None])
+
+    def jvp_forward(self, x: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return self.forward(x), torch.exp(-self.s)[None]*f, self.logdet(x)
+
+    def reverse(self, y: torch.Tensor) -> torch.Tensor:
+        return torch.exp(self.s)[None]*y + self.mu[None]
+
+    def jvp_reverse(self, y: torch.Tensor, f: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the reverse pass as well as the inverse Jacobian-vector-product (iJVP)
+        :param y: a torch tensor with shape [N, dim] where N is the number of points
+        :param f: the vector on which to evaluate the iJVP, a torch tensor with shape [N, dim] where N is the
+                  number of points
+        :return: the tuple (x, inv(J)f, logdet) where:
+                    - y: a torch tensor with shape [N, dim], which are the transformed ys
+                    - inv(J)f: a torch tensor with shape [N, dim], which is the iJVP with f
+        """
+        return torch.exp(self.s)[None]*y + self.mu[None], torch.exp(self.s)[None]*f
+
+
 class NFCompose(nn.Module):
     """
     Composes a number of normalizing-flow layers into one, similar to nn.Sequential
@@ -738,13 +752,6 @@ class NFCompose(nn.Module):
         :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
         """
         for mod in self.transfs: mod.freeze_scale(freeze)
-
-    def rand_init(self, amnt: float):
-        """
-        Random initialization of the layer
-        :param amnt: a float with the strength of the initialization
-        """
-        for mod in self.transfs: mod.rand_init(amnt)
 
     def jacobian(self, x: torch.Tensor) -> torch.Tensor:
         full_jac = torch.eye(x.shape[-1], device=x.device)[None]
@@ -780,9 +787,9 @@ class NFCompose(nn.Module):
 class Diffeo(nn.Module):
 
     def __init__(self, dim: int, rank: int=2, n_layers: int=4, K: int=15,
-                 MLP: bool=False, actnorm: bool=True, RFF: bool=False,
-                 scale_free: bool=False, n_householder: int=0, logtransf: bool=False,
-                 R: float=10, autoregressive: bool=False, latent_dim: int=None):
+                 actnorm: bool=True, RFF: bool=False, MLP: bool=False,
+                 n_householder: int=0, sylvester: bool=True, full_affine: bool=False,
+                 R: float=10, autoregressive: bool=False):
         """
         Initializes a diffeomorphism, which is a normalizing flow with interleaved Affine transformations and
         AffineCoupling layers
@@ -793,23 +800,24 @@ class Diffeo(nn.Module):
         :param MLP: if True, an AffineCoupling layer with an MLP will be used instead of the FFCoupling layer
         :param actnorm: whether the first layer is an invertible standardization of the data (a sort of preprocessing)
         :param RFF: if True, an AffineCoupling layer with an RFF will be used instead of the FFCoupling layer
-        :param scale_free: whether to use a scale-free version of the couplings
+        :param sylvester: whether to use a orthonormal Sylvester transformation (if dimension is greater than 2) at the beginning of the flow
+        :param full_affine: whether to use a full Affine transformation instead of the simpler scale transformation
         :param n_householder: number of Householder transformations to use at the beginning of the flow
         :param R: range of fourier coefficients
-        :param logtransf: a boolean indicating if to log-transform in the first layer or not
         :param latent_dim: if not None, the first layer is a dimensionality reduction layer
         """
         super().__init__()
 
         layers = []
 
-        if logtransf: layers.append(LogTransf())  # log transform if required (e.g. when data is only positive)
-
-        if latent_dim is not None: layers.append(DimReduction(dim, latent_dim))  # linear dimensionality reduction
-
         if actnorm: layers.append(ActNorm(dim))   # an invertible z-scoring of the data
 
-        layers.append(Affine(dim=dim, rank=dim))
+        if sylvester and dim>2: layers.append(OrthoSylvester(dim=dim))   # an orthonormal transformation of the data
+
+        if full_affine:
+            layers.append(Affine(dim=dim, rank=dim))
+        else:
+            layers.append(ScaleTransf(dim=dim))
 
         # add househoulder transformations which can rotate space
         if n_householder > 0:
@@ -817,21 +825,18 @@ class Diffeo(nn.Module):
 
         # build rest of network
         for i in range(n_layers):
-            layers.append(Affine(dim=dim, rank=rank))
-            if MLP:   # uses an MLP for the affine coupling
-                layers.append(MLPCoupling(dim=dim, K=K))
-                layers.append(MLPCoupling(dim=dim, K=K, reverse=True))
-            elif RFF:   # uses random fourier features as the coupling
-                layers.append(RFFCoupling(dim=dim, K=K))
-                layers.append(RFFCoupling(dim=dim, K=K, reverse=True))
-            else:   # uses axis-independent random fourier features as the coupling
-                if not autoregressive:
-                    layers.append(FFCoupling(dim=dim, K=K, R=R, scale_free=scale_free))
-                    layers.append(FFCoupling(dim=dim, K=K, R=R, reverse=True, scale_free=scale_free))
-                else:   # if the transformation is autoregressive, couple each dimension to those that came before
-                    for d in range(dim):
-                        layers.append(FFCoupling(dim=dim, K=K, R=R, scale_free=scale_free,
-                                                 split_dims=[m for m in range(dim) if m!=d]))
+            if full_affine: layers.append(Affine(dim=dim, rank=rank))
+            else: layers.append(ScaleTransf(dim=dim))
+
+            layer_type = MLPCoupling if MLP else RFFCoupling if RFF else FFCoupling
+            if not autoregressive:
+                layers.append(layer_type(dim=dim, K=K, R=R))
+                layers.append(layer_type(dim=dim, K=K, R=R, reverse=True))
+            else:   # if the transformation is autoregressive, couple each dimension to those that came before
+                for d in range(dim):
+                    layers.append(layer_type(dim=dim, K=K, R=R,
+                                                split_dims=[m for m in range(dim) if m!=d]))
+                
 
         self.transf = NFCompose(*layers)
 
@@ -841,13 +846,6 @@ class Diffeo(nn.Module):
         :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
         """
         self.transf.freeze_scale(freeze)
-
-    def rand_init(self, amnt: float):
-        """
-        Random initialization of the layer
-        :param amnt: a float with the strength of the initialization
-        """
-        self.transf.rand_init(amnt)
 
     def jacobian(self, x: torch.Tensor) -> torch.Tensor:
         return self.transf.jacobian(x)

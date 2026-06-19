@@ -24,7 +24,7 @@ class SPEModel(nn.Module):
 
     def logdet(self, x: torch.Tensor) -> torch.Tensor: raise NotImplementedError
 
-    def get_invariant(self, N: int) -> torch.Tensor:
+    def get_invariant(self, N: int, **kwargs) -> torch.Tensor:
         """
         Get points from the invariant set of the prototype, useful for plotting
         :param N: number of points on the attractor to return
@@ -74,8 +74,8 @@ class NFSmoothOrbital(SPEModel):
     def reverse(self, y: torch.Tensor):
         return self.H.reverse(y)
 
-    def get_invariant(self, N: int):
-        return self.H.reverse(self.g.get_invariant(N, self.latent_dim))
+    def get_invariant(self, N: int, **kwargs) -> torch.Tensor:
+        return self.H.reverse(self.g.get_invariant(N, self.latent_dim, **kwargs))
 
     def project_onto_invariant(self, x: torch.Tensor) -> torch.Tensor:
         return self.H.reverse(self.g.project_onto_invariant(x))
@@ -113,8 +113,8 @@ def proj_loss(x, model, proj_var, proj_dim: int=2):
     projLL = .5*x.shape[1]*proj_var
     y = model.forward(x)
     yproj = torch.cat([y[:, :proj_dim], torch.zeros(y.shape[0], y.shape[1]-proj_dim, device=y.device)], dim=-1)
-    diff = torch.mean((model.reverse(yproj) - x)**2)
-    # diff = torch.mean((model.project_onto_invariant(x) - x)**2)
+    # diff = torch.mean((model.reverse(yproj) - x)**2)
+    diff = torch.mean((model.project_onto_invariant(x) - x)**2)
     return torch.exp(proj_var)*diff - proj_dim*projLL/(x.shape[0]*x.shape[1])
 
 
