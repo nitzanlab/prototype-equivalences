@@ -177,6 +177,7 @@ data/
 output/
 tmp/
 cache/
+scripts/
 .DS_Store
 *.ipynb
 *.pdf

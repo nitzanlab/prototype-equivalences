@@ -1,13 +1,9 @@
 import torch
 from torch import nn
-from torchdiffeq import odeint_adjoint as odeint
-from typing import Tuple
-from .NFDiffeo import ActNorm, LogTransf
-from scipy import interpolate
-from typing import Callable, Union
 import pysindy as psi
 import numpy as np
 from tqdm import tqdm
+from typing import Callable
 
 
 class ODENet(nn.Module):
@@ -23,12 +19,12 @@ class ODENet(nn.Module):
         layers += [nn.Linear(last, dim)]
         self.f = nn.Sequential(*layers)
 
-    def forward(self, t: torch.Tensor, x: torch.Tensor):
+    def forward(self, x: torch.Tensor):
         return self.f(x)
 
 
 def get_NODE(x: torch.Tensor, xdot: torch.Tensor, its: int=1000, lr: float=1e-3, hidden: tuple=None,
-             width: int=32, depth: int=2, weight_decay: float=1e-3, activation=nn.SiLU, verbose: bool=False):
+             width: int=32, depth: int=2, weight_decay: float=1e-3, activation=nn.SiLU, verbose: bool=False) -> Callable:
     if hidden is None:
         hidden = [width]*depth
 
@@ -39,13 +35,14 @@ def get_NODE(x: torch.Tensor, xdot: torch.Tensor, its: int=1000, lr: float=1e-3,
     for i in pbar:
         optim.zero_grad()
 
-        loss = torch.mean((xdot - model(0, x))**2)
+        loss = torch.mean((xdot - model(x))**2)
         loss.backward()
         optim.step()
         pbar.set_postfix_str(f'loss={loss.item():.4f}')
 
     model.requires_grad_(False)
-    return lambda x: model(0, x)
+    model.eval()
+    return model
 
 
 def kNN_vectors(y: torch.Tensor, ydot: torch.Tensor, k: int=5) -> Callable:
@@ -69,7 +66,7 @@ def kNN_vectors(y: torch.Tensor, ydot: torch.Tensor, k: int=5) -> Callable:
     return f
 
 
-def fit_SINDy(x: torch.Tensor, xdot: torch.Tensor, library: str='poly', degree: int=3):
+def fit_SINDy(x: torch.Tensor, xdot: torch.Tensor, library: str='poly', degree: int=3) -> Callable:
     """
     Wrapper function to fit SINDy
     :param x: the positions of the inputs, a torch tensor with shape [N, dim]

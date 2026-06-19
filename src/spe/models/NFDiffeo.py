@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torch.optim import Adam
 import numpy as np
 from typing import Tuple
 

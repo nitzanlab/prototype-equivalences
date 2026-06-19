@@ -13,18 +13,17 @@
 
 ---
 
-## Requirements
+## Installation
 
-This code is based on `python 3`. The main package requirements in this repository are:
+This package requires Python 3.9 or later. Clone the repository and install with `pip`:
+
+```bash
+git clone https://github.com/nitzanlab/prototype-equivalences.git
+cd prototype-equivalences
+pip install .
 ```
-torch>=2.0.1
-tqdm
-matplotlib
-```
-Full requirements can be found in the `requirements.txt` file. For easy installation, use the following `pip` command:
-```
-pip install -r requirements.txt
-```
+
+The main dependencies (`torch`, `numpy`, `scipy`, `matplotlib`, `tqdm`, `POT`, `torchdiffeq`, `pysindy`) are installed automatically.
 
 ## Basic Usage
 
