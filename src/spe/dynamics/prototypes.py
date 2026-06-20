@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from torch import nn
-from .utils import simulate_trajectory, cartesian_to_polar, polar_derivative_to_cartesian_derivative
+from .utils import simulate_trajectory
 
 
 class Prototype(nn.Module):
@@ -33,7 +33,8 @@ class Prototype(nn.Module):
         :param T: maximal time to iterate the simulation of the particles
         :return: a torch tensor with shape [N, dim] of the simulated particles
         """
-        init = torch.randn(N, dim, device=self.device)*.01
+        init = self.project_onto_invariant(torch.randn(N, dim))
+        init = init + torch.randn_like(init)*.1
         return self.rand_on_traj(init, T=T)
 
     def get_invariant(self, N: int, dim: int, **kwargs):
@@ -108,6 +109,105 @@ class SOPrototype(Prototype):
         return torch.cat([
             (r * torch.cos(theta))[:, None], (r * torch.sin(theta))[:, None], nonosc*0
         ], dim=-1).reshape(shape)
+
+
+class HeteroclinicFlip(Prototype):
+
+    def __init__(self, f: float=0., K: float=4., decay: float=.5, optimize: bool=False):
+        super().__init__()
+        if optimize:
+            self.f = nn.Parameter(torch.tensor([f]))
+            self.K = nn.Parameter(torch.tensor([K]))
+            self.decay = nn.Parameter(torch.tensor([np.log(decay)]).float())
+        else:
+            self.register_buffer('f', torch.tensor([f]))
+            self.register_buffer('K', torch.tensor([K]))
+            self.register_buffer('decay', torch.tensor([np.log(decay)]).float())
+        
+        self.source = torch.tensor([0, 1])
+        self.sinks = None
+        self.optimize = optimize
+
+    def forward(self, x: torch.Tensor):
+        shape = x.shape
+        x = x.reshape(x.shape[0], -1)
+        nonosc = x[..., 2:]  # non-oscillatory dimensions
+        fx = x[..., 0]
+        fy = x[..., 1]
+        
+        xdot = 4*fx*fx*fx + 4*fx*fy + self.f
+        ydot = 4*fy*fy*fy - 3*fy*fy + 2*fx*fx - 2*fy + self.K
+        decay = torch.exp(self.decay)
+        return torch.cat([- xdot[..., None], - ydot[..., None], - decay * nonosc], dim=-1).reshape(shape)
+
+    @torch.no_grad()
+    def get_invariant(self, N: int, dim: int):
+        opt = self.optimize
+        if self.sinks is None:
+            opt = True
+            self.sinks = -torch.ones(2, 2)
+            self.sinks[1, 0] = 1
+        if opt:
+            self.sinks = self.trajectories(self.sinks, T=3)[-1]
+
+        invariant = torch.stack([self.source, self.sinks[0], self.sinks[1]])
+        return torch.cat([invariant, torch.zeros(3, dim-2)], dim=1)
+
+    def project_onto_invariant(self, x: torch.Tensor, tau: float=.01) -> torch.Tensor:
+        inv = self.get_invariant(N=3, dim=x.shape[1])  # (3, dim)
+        D = torch.sum(x*x, dim=-1)[:, None] - 2*x@inv.T + torch.sum(inv*inv, dim=-1)[None]  # (N, 3)
+        w = torch.softmax(-D / tau, dim=1)  # (N, 3)
+        return w @ inv  # (N, dim)
+
+
+
+class DualCusp(Prototype):
+
+    def __init__(self, f: float=0., K: float=4., decay: float=.5, optimize: bool=False):
+        super().__init__()
+        if optimize:
+            self.f = nn.Parameter(torch.tensor([f]))
+            self.K = nn.Parameter(torch.tensor([K]))
+            self.decay = nn.Parameter(torch.tensor([np.log(decay)]).float())
+        else:
+            self.register_buffer('f', torch.tensor([f]))
+            self.register_buffer('K', torch.tensor([K]))
+            self.register_buffer('decay', torch.tensor([np.log(decay)]).float())
+
+        self.source = torch.tensor([0, 1])
+        self.sinks = None
+        self.optimize = optimize
+
+    def forward(self, x: torch.Tensor):
+        shape = x.shape
+        x = x.reshape(x.shape[0], -1)
+        nonosc = x[..., 2:]  # non-oscillatory dimensions
+        fx = x[..., 0]
+        fy = x[..., 1]
+        
+        xdot = 4*fx*fx*fx + 8*fx*fy + self.f
+        ydot = 4*fy*fy*fy - 3*fy*fy + 4*fx*fx + 2*fy + self.K
+        decay = torch.exp(self.decay)
+        return torch.cat([- xdot[..., None], - ydot[..., None], - decay * nonosc], dim=-1).reshape(shape)
+
+    @torch.no_grad()
+    def get_invariant(self, N: int, dim: int):
+        opt = self.optimize
+        if self.sinks is None:
+            opt = True
+            self.sinks = -torch.ones(2, 2)
+            self.sinks[1, 0] = 1
+        if opt:
+            self.sinks = self.trajectories(self.sinks, T=3)[-1]
+
+        invariant = torch.stack([self.source, self.sinks[0], self.sinks[1]])
+        return torch.cat([invariant, torch.zeros(3, dim-2)], dim=1)
+
+    def project_onto_invariant(self, x: torch.Tensor, tau: float=.01) -> torch.Tensor:
+        inv = self.get_invariant(N=3, dim=x.shape[1])  # (3, dim)
+        D = torch.sum(x*x, dim=-1)[:, None] - 2*x@inv.T + torch.sum(inv*inv, dim=-1)[None]  # (N, 3)
+        w = torch.softmax(-D / tau, dim=1)  # (N, 3)
+        return w @ inv  # (N, dim)
 
 
 class MultiStablePrototype(Prototype):

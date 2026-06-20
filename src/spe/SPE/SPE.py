@@ -9,15 +9,18 @@ from tqdm.autonotebook import tqdm
 
 class SPEModel(nn.Module):
 
-    def __init__(self, dim: int, prototype: Union[Prototype, tuple, dict], **NF_kwargs):
+    def __init__(self, dim: int, prototype: Union[Prototype, tuple, dict], x: torch.Tensor=None, xdot: torch.Tensor=None, **NF_kwargs):
         super().__init__()
         if isinstance(prototype, tuple): prototype = SOPrototype(*prototype)
         if isinstance(prototype, dict): prototype = SOPrototype(**prototype)
         self.proto = prototype
         self.H = Diffeo(dim=dim, **NF_kwargs)
         self.dim = dim
-        self.latent_dim = dim
-        if 'latent_dim' in NF_kwargs: self.latent_dim = NF_kwargs['latent_dim']
+
+        if x is not None: 
+            z = self.proto.simulate(x.shape[0], self.dim, T=2.)
+            zdot = self.proto(z)
+            self.H.initialize(x, xdot, zdot)
 
     def freeze_scale(self, freeze: bool):
         self.H.freeze_scale(freeze)
@@ -41,7 +44,7 @@ class SPEModel(nn.Module):
         :param N: number of points on the attractor to return
         :return: around N points on the attractor, a torch tensor with shape [~N, dim]
         """
-        return self.H.reverse(self.proto.get_invariant(N, self.latent_dim, **kwargs))
+        return self.H.reverse(self.proto.get_invariant(N, self.dim, **kwargs))
 
     def project_onto_invariant(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -56,7 +59,7 @@ class SPEModel(nn.Module):
     def trajectories(self, init: torch.Tensor, T: float = 10., step: float = 5e-2, euler: bool = False):
         init = self.H.forward(init)
         traj = self.proto.trajectories(init, T=T, step=step, euler=euler)
-        return self.H.reverse(traj.reshape(-1, self.latent_dim)).reshape(traj.shape[0], traj.shape[1], -1)
+        return self.H.reverse(traj.reshape(-1, self.dim)).reshape(traj.shape[0], traj.shape[1], -1)
 
 
 # a default set of archetypes that can be used; these are the archetypes used for all 2D tests
@@ -82,75 +85,106 @@ def equiv_err(xdot, jvp, ydot, noise: float=0.):
 
 def proj_loss(x, model, proj_var, proj_dim: int=2):
     # define the loss related to how far the projection is from the true points
-    if proj_var is None: return 0
+    if proj_var is None: return torch.tensor(0., device=x.device)
     projLL = .5*x.shape[1]*proj_var
     diff = torch.mean((model.project_onto_invariant(x) - x)**2)
     return torch.exp(proj_var)*diff - proj_dim*projLL/(x.shape[0]*x.shape[1])
 
 
 def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int=300, lr: float=5e-3, 
-                  verbose=False, det_reg: float=.0, weight_decay: float=1e-3, proj_reg: float=None):
+                  verbose=False, freeze_frac: float=.0, det_reg: float=.0, center_reg: float=.0, weight_decay: float=1e-3, 
+                  proj_reg: float=None):
     """
-    Fits the supplied observations to a prototype using the DFORM loss
-    :param model: the diffeomorphism-wrapped prototype to be trained, as a prototypes.DiffeoWrapper object
+    Fits the supplied observations to the given prototype g using a variant of the smooth-equivalence loss defined in
+    DFORM under the diffeomorophism H
+    :param model: the model to fit, an SPEModel class (see above)
     :param x: the positions of the observations, a torch tensor with shape [N, dim]
     :param xdot: the vectors associated with the above positions, a torch tensor with shape [N, dim]
-    :param its: number of optimization iterations
+    :param g: the prototype; a Callable that gets a position y as input and returns the velocity ydot at that position
+    :param its: number of GD iterations
     :param lr: the learning rate
     :param verbose: a boolean indicating whether progress should be printed (True) or not (False)
+    :param freeze_frac: fraction of iterations to freeze non-linear transformations in H (between 0 and 1)
     :param det_reg: how much regularization should be added on the absolute value of the determinant
+    :param center_reg: a regularization coefficient that penalizes transformations whose stationary point is very far
+                       from the mean of the data
     :param weight_decay: amount of weight decay to use during training
     :param proj_reg: initial strength of the projection regularization used during fitting; this value is in log-scale,
                      so for no regularization use proj_reg=None (proj_reg=0 is like a regularization strength of 1)
-    :return: - the fitted model
+    :return: - the fitted network, H
              - the average loss over all observed vectors
-             - the score, which is just the equivalence loss of the observed vectors
+             - the average log-determinant over all observed vectors
+             - the score, which is the loss of the first two dimensions of the prototype, of the observed vectors
     """
     # ========================== initialize things before fitting ======================================================
+    if freeze_frac > 0: model.freeze_scale(True)  # freeze weights if needed
+    if freeze_frac > 1: freeze_frac = freeze_frac/its
+
+    # calculate data mean for center regularization
+    center = torch.mean(x, dim=0, keepdim=True)
+
     # initialize parameters list
     params = list(model.parameters())
 
-    if x.shape[-1]==2: proj_reg = None
-
-    # define optimizer
+    # setup all of the needed options for projection regularization
     if proj_reg is not None:
         proj_reg = torch.ones(1, device=x.device)*proj_reg
         proj_reg.requires_grad = True
-        optim = Adam(params + [proj_reg], weight_decay=weight_decay)
-    else:
-        optim = Adam(params, lr=lr, weight_decay=weight_decay)
+        params += [proj_reg]
 
+
+    # define optimizer
+    optim = Adam(params, lr=lr, weight_decay=weight_decay)
     # ==================================================================================================================
 
+    unfrozen = False
     pbar = tqdm(range(its), disable=not verbose)
     # fitting process
     for i in pbar:
         optim.zero_grad()
 
-        gHx, dHxdot, ldet = model.loss_terms(x, xdot)
-        mseloss = torch.mean(equiv_err(gHx, dHxdot, xdot))  # calculate the error according to the equivalence
+        # if enough iterations have passed, unfreeze weights
+        if freeze_frac > 0 and i > its*freeze_frac and not unfrozen:
+            model.freeze_scale(False)  # unfreeze weights to do with determinant
+            if proj_reg is not None: optim = Adam(list(model.parameters()) + [proj_reg], weight_decay=weight_decay)
+            else: optim = Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+            unfrozen = True
+
+        ydot, jvp, ldet = model.loss_terms(x, xdot)   # calculate transformed inputs
+
+        err = equiv_err(xdot, jvp, ydot)  # calculate the error according to the equivalence
+        mseloss = torch.mean(err)
 
         dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
+        closs = torch.mean((center-model.reverse(torch.zeros_like(center)))**2)  # adds loss for transformation of center (regularization)
         ploss = proj_loss(x, model, proj_reg)  # adds loss for projection
-        loss = mseloss + det_reg*dloss + ploss  # put full loss together
+        loss = mseloss + det_reg*dloss + center_reg*closs + ploss  # put full loss together
 
         loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), 10)  # clip gradients for stable training
+        nn.utils.clip_grad_norm_(model.parameters(), 10.)  # clip gradients for stable training
         optim.step()
 
         loss = loss.item()
         pbar.set_postfix_str(f'loss={loss:.4f}'+
-                             (f'; projvar={torch.exp(proj_reg).item():.3f}' if proj_reg is not None else ''))
+                             (f'; proj_reg={torch.exp(proj_reg).item():.3f}' if proj_reg is not None else ''))
 
     # ========================== calculate final losses for everything =================================================
+    model.eval()
+
     with torch.no_grad():
-        gHx, dHxdot, ldet = model.loss_terms(x, xdot)
-        err = torch.mean(equiv_err(gHx, dHxdot, xdot))
-        ploss = proj_loss(x, model, proj_reg)
-    dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
+        ydot, jvp, ldet = model.loss_terms(x, xdot)  # calculate transformed inputs
+
+        err = equiv_err(xdot, jvp, ydot)  # calculate the error according to the equivalence
+        mseloss = torch.mean(err)
+
+        dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
+        closs = torch.mean((center - model.reverse(
+            torch.zeros_like(center))) ** 2)  # adds loss for transformation of center (regularization)
+        ploss = proj_loss(x, model, proj_reg)  # adds loss for projection
+        loss = mseloss + det_reg * dloss + center_reg * closs + ploss  # put full loss together
 
     score = torch.mean(err).item()
-    loss = torch.mean(err).item() + det_reg*dloss.item() + ploss.item()
+    loss = loss.item()
     # ==================================================================================================================
 
     return model, loss, score

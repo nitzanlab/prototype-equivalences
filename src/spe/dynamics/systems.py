@@ -504,7 +504,7 @@ class Lienard(PhaseSpace):
     - $f,g$ of polynomial basis (automatically then continuous and differentiable for all x)
     - $g$ is an odd function ($g(-x)=-g(x)$)
     - $g(x) > 0$ for $x>0$
-    - cummulative function of f, $F(x)=\int_0^xf(u)du$, and is negative for $0<x<a, F(x)=0$, $x>a$ is positive and nondecreasing
+    - cummulative function of f, $F(x)=integrate(f(u)du, 0, x)$, and is negative for $0<x<a, F(x)=0$, $x>a$ is positive and nondecreasing
 
     Copied from twa
     """

@@ -805,6 +805,9 @@ class Diffeo(nn.Module):
         """
         super().__init__()
 
+        self.actnorm = actnorm
+        self.sylvester = sylvester
+
         layers = []
 
         if actnorm: layers.append(ActNorm(dim))   # an invertible z-scoring of the data
@@ -836,6 +839,21 @@ class Diffeo(nn.Module):
                 
 
         self.transf = NFCompose(*layers)
+
+    def initialize(self, x: torch.Tensor, xdot: torch.Tensor=None, zdot: torch.Tensor=None):
+        with torch.no_grad():
+            self.transf.freeze_scale(False)
+            self.transf.forward(x)
+
+            if self.sylvester and xdot is not None:
+                if self.actnorm:
+                    _, ydot, _ = self.transf.transfs[0].jvp_forward(x, xdot)
+                else: ydot = xdot
+
+                Ux, _, _ = torch.linalg.svd((ydot-ydot.mean(dim=0)).T, full_matrices=False)
+                if zdot is not None: Uz, _, _ = torch.linalg.svd((zdot-zdot.mean(dim=0)).T, full_matrices=False)
+                else: Uz = torch.eye(Ux.shape[0], device=Ux.device)
+                self.transf.transfs[1].Q_center.data = Uz.T@Ux
 
     def freeze_scale(self, freeze: bool=True):
         """
