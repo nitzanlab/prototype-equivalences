@@ -5,6 +5,8 @@ from ..dynamics.prototypes import Prototype, SOPrototype
 from typing import Iterable, Union
 from torch.optim import Adam
 from tqdm.autonotebook import tqdm
+import numpy as np
+from ..dynamics.utils import SWD
 
 
 class SPEModel(nn.Module):
@@ -20,7 +22,7 @@ class SPEModel(nn.Module):
         if x is not None: 
             z = self.proto.simulate(x.shape[0], self.dim, T=2.)
             zdot = self.proto(z)
-            self.H.initialize(x, xdot, zdot)
+            self.H.initialize(x, xdot, z, zdot)
 
     def freeze_scale(self, freeze: bool):
         self.H.freeze_scale(freeze)
@@ -37,6 +39,10 @@ class SPEModel(nn.Module):
 
     def reverse(self, y: torch.Tensor):
         return self.H.reverse(y)
+
+    def potential(self, x: torch.Tensor):
+        y = self.forward(x)
+        return self.proto.potential(y)
 
     def get_invariant(self, N: int, **kwargs) -> torch.Tensor:
         """
@@ -83,17 +89,19 @@ def equiv_err(xdot, jvp, ydot, noise: float=0.):
     return err/(1+nvar/norms)
 
 
-def proj_loss(x, model, proj_var, proj_dim: int=2):
+def proj_loss(x, model, proj_var, mean_var: float=-2, var_variance: float=2):
     # define the loss related to how far the projection is from the true points
     if proj_var is None: return torch.tensor(0., device=x.device)
     projLL = .5*x.shape[1]*proj_var
     diff = torch.mean((model.project_onto_invariant(x) - x)**2)
-    return torch.exp(proj_var)*diff - proj_dim*projLL/(x.shape[0]*x.shape[1])
+    proj_loss = torch.exp(proj_var)*diff - projLL/(x.shape[0]*x.shape[1])
+    hyper_loss = .5*torch.sum((proj_var-mean_var)**2 / var_variance + proj_var + np.log(var_variance) + np.log(2*np.pi))
+    return proj_loss + hyper_loss/(x.shape[0]*x.shape[1])
 
 
 def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int=300, lr: float=5e-3, 
                   verbose=False, freeze_frac: float=.0, det_reg: float=.0, center_reg: float=.0, weight_decay: float=1e-3, 
-                  proj_reg: float=None):
+                  proj_reg: float=None, poten_reg: float=0.):
     """
     Fits the supplied observations to the given prototype g using a variant of the smooth-equivalence loss defined in
     DFORM under the diffeomorophism H
@@ -126,7 +134,7 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
     # initialize parameters list
     params = list(model.parameters())
 
-    # setup all of the needed options for projection regularization
+    # # setup all of the needed options for projection regularization
     if proj_reg is not None:
         proj_reg = torch.ones(1, device=x.device)*proj_reg
         proj_reg.requires_grad = True
@@ -158,7 +166,13 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
         dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
         closs = torch.mean((center-model.reverse(torch.zeros_like(center)))**2)  # adds loss for transformation of center (regularization)
         ploss = proj_loss(x, model, proj_reg)  # adds loss for projection
-        loss = mseloss + det_reg*dloss + center_reg*closs + ploss  # put full loss together
+
+        if poten_reg > 0: 
+            poloss = model.potential(x).mean()
+        else:
+            poloss = 0.
+
+        loss = mseloss + det_reg*dloss + center_reg*closs + poten_reg*poloss + ploss  # put full loss together
 
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 10.)  # clip gradients for stable training

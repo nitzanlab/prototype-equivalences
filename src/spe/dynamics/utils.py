@@ -258,7 +258,7 @@ def SWD(set1: torch.Tensor, set2: torch.Tensor, n_proj: int=100) -> float:
     proj1, proj2 = set1 @ proj, set2 @ proj
 
     proj1, proj2 = duplicate_to_match_lengths(proj1.T, proj2.T)
-    return torch.abs(torch.sort(proj1, dim=0)[0] - torch.sort(proj2, dim=0)[0]).mean().item()
+    return torch.abs(torch.sort(proj1, dim=0)[0] - torch.sort(proj2, dim=0)[0]).mean()
 
 
 def invariant_distribution_error(field1: Union[Callable, torch.Tensor], field2: Union[Callable, torch.Tensor],

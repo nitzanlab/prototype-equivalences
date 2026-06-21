@@ -55,6 +55,14 @@ class Prototype(nn.Module):
         """
         raise NotImplementedError
 
+    def potential(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Returns the potential component of the dynamics determined by the prototype
+        :param x: the positions x, as a torch tensor with shape [N, dim]
+        :return: the scalar potential of the prototype in the same positions, a torch tensor with shape [N,]
+        """
+        raise NotImplementedError
+
 
 class SOPrototype(Prototype):
 
@@ -109,6 +117,13 @@ class SOPrototype(Prototype):
         return torch.cat([
             (r * torch.cos(theta))[:, None], (r * torch.sin(theta))[:, None], nonosc*0
         ], dim=-1).reshape(shape)
+    
+    def potential(self, x):
+        xx = x[..., 0]
+        yy = x[..., 1]
+        other = x[..., 2:]
+        r_sq = xx*xx + yy*yy
+        return .5*r_sq*(.5*r_sq-self.a) + .5*torch.exp(self.decay)*torch.sum(other**2, dim=-1)
 
 
 class HeteroclinicFlip(Prototype):
@@ -158,12 +173,22 @@ class HeteroclinicFlip(Prototype):
         D = torch.sum(x*x, dim=-1)[:, None] - 2*x@inv.T + torch.sum(inv*inv, dim=-1)[None]  # (N, 3)
         w = torch.softmax(-D / tau, dim=1)  # (N, 3)
         return w @ inv  # (N, dim)
-
+    
+    def simulate(self, N: int, dim: int, T: float=1.) -> torch.Tensor:
+        init = self.project_onto_invariant(torch.randn(N, dim))
+        init = init + torch.randn_like(init)*.1
+        return self.rand_on_traj(init, T=T)
+    
+    def potential(self, x):
+        xx = x[..., 0]
+        yy = x[..., 1]
+        other = x[..., 2:]
+        return xx**4 + yy**4 - yy**3 + 2*yy*xx**2 - yy**2 + self.f*xx + self.K*yy  + .5*torch.exp(self.decay)*torch.sum(other**2, dim=-1)
 
 
 class DualCusp(Prototype):
 
-    def __init__(self, f: float=0., K: float=4., decay: float=.5, optimize: bool=False):
+    def __init__(self, f: float=0., K: float=-.15, decay: float=.5, optimize: bool=False):
         super().__init__()
         if optimize:
             self.f = nn.Parameter(torch.tensor([f]))
@@ -208,6 +233,17 @@ class DualCusp(Prototype):
         D = torch.sum(x*x, dim=-1)[:, None] - 2*x@inv.T + torch.sum(inv*inv, dim=-1)[None]  # (N, 3)
         w = torch.softmax(-D / tau, dim=1)  # (N, 3)
         return w @ inv  # (N, dim)
+
+    def simulate(self, N: int, dim: int, T: float=1.) -> torch.Tensor:
+        init = self.project_onto_invariant(torch.randn(N, dim))
+        init = init + torch.randn_like(init)*.1
+        return self.rand_on_traj(init, T=T)
+
+    def potential(self, x):
+        xx = x[..., 0]
+        yy = x[..., 1]
+        other = x[..., 2:]
+        return xx**4 + yy**4 - yy**3 + 4*yy*xx**2 + yy**2 + self.f*xx + self.K*yy + .5*torch.exp(self.decay)*torch.sum(other**2, dim=-1)
 
 
 class MultiStablePrototype(Prototype):

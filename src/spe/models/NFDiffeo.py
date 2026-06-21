@@ -783,10 +783,10 @@ class NFCompose(nn.Module):
 
 class Diffeo(nn.Module):
 
-    def __init__(self, dim: int, rank: int=2, n_layers: int=4, K: int=15,
+    def __init__(self, dim: int, rank: int=2, n_layers: int=3, K: int=4,
                  actnorm: bool=True, RFF: bool=False, MLP: bool=False,
-                 n_householder: int=0, sylvester: bool=True, full_affine: bool=False,
-                 R: float=10, autoregressive: bool=False):
+                 n_householder: int=0, sylvester: bool=False, full_affine: bool=True,
+                 autoregressive: bool=False):
         """
         Initializes a diffeomorphism, which is a normalizing flow with interleaved Affine transformations and
         AffineCoupling layers
@@ -814,33 +814,34 @@ class Diffeo(nn.Module):
 
         if sylvester: layers.append(OrthoSylvester(dim=dim))   # an orthonormal transformation of the data
 
-        if full_affine:
-            layers.append(Affine(dim=dim, rank=dim))
-        else:
-            layers.append(ScaleTransf(dim=dim))
+        layers.append(ScaleTransf(dim=dim))
 
+        if full_affine: layers.append(Affine(dim=dim, rank=dim))
+        
         # add househoulder transformations which can rotate space
         if n_householder > 0:
             for i in range(n_householder): layers.append(HouseholderTransf(dim))
 
         # build rest of network
         for i in range(n_layers):
+            if sylvester: layers.append(OrthoSylvester(dim=dim))
+
             if full_affine: layers.append(Affine(dim=dim, rank=rank))
             else: layers.append(ScaleTransf(dim=dim))
 
             layer_type = MLPCoupling if MLP else RFFCoupling if RFF else FFCoupling
             if not autoregressive:
-                layers.append(layer_type(dim=dim, K=K, R=R))
-                layers.append(layer_type(dim=dim, K=K, R=R, reverse=True))
+                layers.append(layer_type(dim=dim, K=K))
+                layers.append(layer_type(dim=dim, K=K, reverse=True))
             else:   # if the transformation is autoregressive, couple each dimension to those that came before
                 for d in range(dim):
-                    layers.append(layer_type(dim=dim, K=K, R=R,
+                    layers.append(layer_type(dim=dim, K=K,
                                                 split_dims=[m for m in range(dim) if m!=d]))
                 
 
         self.transf = NFCompose(*layers)
 
-    def initialize(self, x: torch.Tensor, xdot: torch.Tensor=None, zdot: torch.Tensor=None):
+    def initialize(self, x: torch.Tensor, xdot: torch.Tensor=None, z: torch.Tensor=None, zdot: torch.Tensor=None):
         with torch.no_grad():
             self.transf.freeze_scale(False)
             self.transf.forward(x)
