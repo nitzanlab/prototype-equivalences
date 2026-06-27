@@ -93,14 +93,6 @@ class RFFCoupling(nn.Module):
         x1, _ = self._split(x)
         return self._ff(x1, self.g_s, self.W_s, self.b_s).sum(dim=1)
 
-    def jacobian(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Calculates the Jacobian of the transform at points x
-        :param x: a torch tensor with shape [N, dim] where N is the number of points
-        :return: a torch tensor with shape [N, dim, dim] of the Jacobians evaluated at each point x
-        """
-        raise NotImplementedError
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         :param x: a torch tensor with shape [N, dim] where N is the number of points
@@ -750,14 +742,6 @@ class NFCompose(nn.Module):
         """
         for mod in self.transfs: mod.freeze_scale(freeze)
 
-    def jacobian(self, x: torch.Tensor) -> torch.Tensor:
-        full_jac = torch.eye(x.shape[-1], device=x.device)[None]
-        for mod in self.transfs:
-            jac = mod.jacobian(x)
-            full_jac = jac@full_jac
-            x = mod.forward(x)
-        return full_jac
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for mod in self.transfs:
             x = mod.forward(x)
@@ -862,9 +846,6 @@ class Diffeo(nn.Module):
         :param freeze: a boolean indicating whether to freeze (True) or unfreeze (False)
         """
         self.transf.freeze_scale(freeze)
-
-    def jacobian(self, x: torch.Tensor) -> torch.Tensor:
-        return self.transf.jacobian(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
