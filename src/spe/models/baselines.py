@@ -90,7 +90,7 @@ def fit_SINDy(x: torch.Tensor, xdot: torch.Tensor, library: str='poly', degree: 
 
     # fit SINDy
     sindy_model = psi.SINDy(feature_library=library)
-    sindy_model = sindy_model.fit(x=x_multi, x_dot=xdot_multi, t=t_multi, multiple_trajectories=True)
+    sindy_model = sindy_model.fit(x=x_multi, x_dot=xdot_multi, t=t_multi)
 
     def sindy_func(v):
         v = torch.clamp(v, -100, 100)

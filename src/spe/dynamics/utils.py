@@ -52,25 +52,31 @@ def simulate_trajectory(grad, init: torch.Tensor, T: float, step: float=5e-2, eu
     :param euler: a boolean dictating whether an Euler (first-order) discretization should be used, other-wise a 4th
                   order method is used
     :param clamp: clamp the gradients to a particular value, to ensure numerical stability
-    :param noise: if this variable is not None, then the Euler-Murayama method is used to simulate an SDE, with:
+    :param noise: if this nvariable is not None, then the Euler-Murayama method is used to simulate an SDE, with:
                   - noise is float: assumes the SDE has the same amount of noise uniformly everywhere and 'noise' is
-                        the variance of the noise
+                        the nvariance of the noise
                   - noise is a Callable: assumes that the input to the callable is a batch of positions 'x' ([N, dim])
-                        and the  output is a torch tensor depicting the variance of the noise at 'x' ([N])
+                        and the  output is a torch tensor depicting the nvariance of the noise at 'x' ([N])
     :return: a torch tensor with shape [round(T/step), N, dim]
     """
     if noise is not None: euler = True   # only Euler-Murayama supported for SDE integration
     if isinstance(noise, int): noise = float(noise)
     if isinstance(noise, float):
-        std = noise
-        noise = lambda x: std*torch.ones(x.shape[0], x.shape[1], device=x.device)
+        nvar = noise
+        noise = lambda x: nvar*torch.ones_like(x)
+    elif isinstance(noise, np.ndarray):
+        nvar = torch.from_numpy(noise).float()
+        noise = lambda x: nvar.to(x.device)
+    elif isinstance(noise, torch.Tensor):
+        nvar = noise
+        noise = lambda x: nvar.to(x.device)
 
     flows = [init]
     pnts = init.clone()
     for t in np.arange(0, T, step):
         if euler:
             if noise is not None:
-                eps = torch.sqrt(noise(pnts))*step*torch.randn_like(pnts)
+                eps = torch.sqrt(noise(pnts))*(step**0.5)*torch.randn_like(pnts)
             else:
                 eps = 0
             pnts = pnts + step*torch.clamp(grad(pnts), -clamp, clamp) + eps

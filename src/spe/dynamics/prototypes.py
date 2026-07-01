@@ -270,66 +270,6 @@ class DualCusp(Prototype):
         return xx**4 + yy**4 - yy**3 + 4*yy*xx**2 + yy**2 + self.f*xx + self.K*yy + .5*torch.exp(self.decay)*torch.sum(other**2, dim=-1)
 
 
-class Bifurcation(Prototype):
-
-    def __init__(self, f: float=0., K: float=0.35, decay: float=.5, optimize: bool=False):
-        super().__init__()
-        if optimize:
-            self.f = nn.Parameter(torch.tensor([f]))
-            self.K = nn.Parameter(torch.tensor([K]))
-            self.decay = nn.Parameter(torch.tensor([np.log(decay)]).float())
-        else:
-            self.register_buffer('f', torch.tensor([f]))
-            self.register_buffer('K', torch.tensor([K]))
-            self.register_buffer('decay', torch.tensor([np.log(decay)]).float())
-
-        self.source = torch.tensor([0, 1])
-        self.sinks = None
-        self.optimize = optimize
-
-    def forward(self, x: torch.Tensor):
-        shape = x.shape
-        x = x.reshape(x.shape[0], -1)
-        nonosc = x[..., 2:]  # non-oscillatory dimensions
-        fx = x[..., 0]
-        fy = x[..., 1]
-        
-        xdot = 4*fx*fx*fx + 4*fx*fy + self.f
-        ydot = 4*fy*fy*fy - 3*fy*fy + 2*fx*fx + 2*fy + self.K
-        decay = torch.exp(self.decay)
-        return torch.cat([- xdot[..., None], - ydot[..., None], - decay * nonosc], dim=-1).reshape(shape)
-
-    @torch.no_grad()
-    def get_invariant(self, N: int, dim: int):
-        opt = self.optimize
-        if self.sinks is None:
-            opt = True
-            self.sinks = -torch.ones(2, 2)
-            self.sinks[1, 0] = 0
-        if opt:
-            self.sinks = self.trajectories(self.sinks, T=3)[-1]
-
-        invariant = torch.stack([self.source, self.sinks[0], self.sinks[1]])
-        return torch.cat([invariant, torch.zeros(3, dim-2)], dim=1)
-
-    def project_onto_invariant(self, x: torch.Tensor, tau: float=.01) -> torch.Tensor:
-        inv = self.get_invariant(N=3, dim=x.shape[1])  # (3, dim)
-        D = torch.sum(x*x, dim=-1)[:, None] - 2*x@inv.T + torch.sum(inv*inv, dim=-1)[None]  # (N, 3)
-        w = torch.softmax(-D / tau, dim=1)  # (N, 3)
-        return w @ inv  # (N, dim)
-
-    def simulate(self, N: int, dim: int, T: float=1.) -> torch.Tensor:
-        init = self.project_onto_invariant(torch.randn(N, dim))
-        init = init + torch.randn_like(init)*.1
-        return self.rand_on_traj(init, T=T)
-
-    def potential(self, x):
-        xx = x[..., 0]
-        yy = x[..., 1]
-        other = x[..., 2:]
-        return xx**4 + yy**4 - yy**3 + 2*yy*xx**2 + yy**2 + self.f*xx + self.K*yy + .5*torch.exp(self.decay)*torch.sum(other**2, dim=-1)
-
-
 class MultiStablePrototype(Prototype):
 
     def __init__(self, pos: torch.Tensor, sigma: float=.1, decay: float=.5, optimize: bool=False):

@@ -39,6 +39,12 @@ class SPEModel(nn.Module):
 
     def reverse(self, y: torch.Tensor):
         return self.H.reverse(y)
+    
+    def predict(self, x: torch.Tensor):
+        y = self.H.forward(x)
+        ydot = self.proto(y)
+        _, xdot = self.H.jvp_reverse(y, ydot)
+        return xdot
 
     def potential(self, x: torch.Tensor):
         y = self.forward(x)
@@ -67,6 +73,8 @@ class SPEModel(nn.Module):
         traj = self.proto.trajectories(init, T=T, step=step, euler=euler)
         return self.H.reverse(traj.reshape(-1, self.dim)).reshape(traj.shape[0], traj.shape[1], -1)
 
+    def __call__(self, x): return self.predict(x)
+
 
 # a default set of archetypes that can be used; these are the archetypes used for all 2D tests
 _default_prototypes = [
@@ -77,10 +85,18 @@ _default_prototypes = [
 ]
 
 
-def equiv_err(xdot, jvp, ydot, noise: float=0.):
-    # define the MSE error for the smooth orbital equivalence
-    err = (jvp / (torch.norm(jvp, dim=-1, keepdim=True) + 1e-6)
-           - ydot / (torch.norm(ydot, dim=-1, keepdim=True) + 1e-6))**2
+def equiv_err(xdot, jvp, ydot, noise: float=0., normalization: str='soe'):
+    if normalization.lower() == 'soe':
+        # define the MSE error for the smooth orbital equivalence
+        err = (jvp / (torch.norm(jvp, dim=-1, keepdim=True) + 1e-6)
+            - ydot / (torch.norm(ydot, dim=-1, keepdim=True) + 1e-6))**2
+    elif normalization.lower() == 'cosine':
+        norm = torch.sqrt(torch.norm(jvp, dim=-1, keepdim=True)*torch.norm(ydot, dim=-1, keepdim=True)) + 1e-6
+        err = (jvp/norm - ydot/norm)**2
+    elif normalization.lower() == 'none' or normalization is None:
+        err = (jvp - ydot)**2
+    else: 
+        raise NotImplementedError(f'Normalization {normalization} is not a valid normalization scheme. Please choose between SOE, cosine or none.')
     if noise == 0: return err
 
     # if there is expected to be noise in the observations, down-weight points with small norms relative to noise
@@ -93,7 +109,10 @@ def proj_loss(x, model, proj_var, mean_var: float=-2, var_variance: float=2):
     # define the loss related to how far the projection is from the true points
     if proj_var is None: return torch.tensor(0., device=x.device)
     projLL = .5*x.shape[1]*proj_var
-    diff = torch.mean((model.project_onto_invariant(x) - x)**2)
+    y = model.H.forward(x)
+    y[:, 2:] = 0*y[:, 2:]
+    diff = torch.mean((model.H.reverse(y) - x)**2)
+    # diff = torch.mean((model.project_onto_invariant(x) - x)**2)
     proj_loss = torch.exp(proj_var)*diff - projLL/(x.shape[0]*x.shape[1])
     hyper_loss = .5*torch.sum((proj_var-mean_var)**2 / var_variance + proj_var + np.log(var_variance) + np.log(2*np.pi))
     return proj_loss + hyper_loss/(x.shape[0]*x.shape[1])
@@ -101,7 +120,7 @@ def proj_loss(x, model, proj_var, mean_var: float=-2, var_variance: float=2):
 
 def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int=300, lr: float=5e-3, 
                   verbose=False, freeze_frac: float=.0, det_reg: float=.0, center_reg: float=.0, weight_decay: float=1e-3, 
-                  proj_reg: float=None, poten_reg: float=0.):
+                  proj_reg: float=None, poten_reg: float=0., normalization: str='soe'):
     """
     Fits the supplied observations to the given prototype g using a variant of the smooth-equivalence loss defined in
     DFORM under the diffeomorophism H
@@ -160,7 +179,7 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
 
         ydot, jvp, ldet = model.loss_terms(x, xdot)   # calculate transformed inputs
 
-        err = equiv_err(xdot, jvp, ydot)  # calculate the error according to the equivalence
+        err = equiv_err(xdot, jvp, ydot, normalization=normalization)  # calculate the error according to the equivalence
         mseloss = torch.mean(err)
 
         dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
@@ -188,7 +207,7 @@ def fit_prototype(model: SPEModel, x: torch.Tensor, xdot: torch.Tensor, its: int
     with torch.no_grad():
         ydot, jvp, ldet = model.loss_terms(x, xdot)  # calculate transformed inputs
 
-        err = equiv_err(xdot, jvp, ydot)  # calculate the error according to the equivalence
+        err = equiv_err(xdot, jvp, ydot, normalization=normalization)  # calculate the error according to the equivalence
         mseloss = torch.mean(err)
 
         dloss = torch.mean(torch.abs(ldet))  # adds the loss over the determinant (for regularization)
