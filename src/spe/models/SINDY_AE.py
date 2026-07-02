@@ -91,10 +91,10 @@ class SINDyAutoencoder(nn.Module):
         return torch.func.jvp(self.decoder, (z,), (zdot,))[1]
 
 
-def get_SINDy_AE(x: torch.Tensor, xdot: torch.Tensor, latent: int=3, library: str='poly', degree: int=3,
-                 its: int=1000, lr: float=1e-3, hidden: tuple=None, width: int=32, depth: int=2,
-                 weight_decay: float=1e-3, activation=nn.SiLU, l1: float=1e-3, l2: float=1e-3, l_reg: float=1e-5,
-                 threshold: float=0.1, thresh_freq: int=100, verbose: bool=False) -> Callable:
+def get_SINDy_AE(x: torch.Tensor, xdot: torch.Tensor, latent: int=2, library: str='poly', degree: int=3,
+                 its: int=5000, lr: float=1e-3, hidden: tuple=None, width: int=32, depth: int=2,
+                 weight_decay: float=1e-5, activation=nn.SiLU, l1: float=1e-3, l2: float=1e-3, l_reg: float=1e-5,
+                 threshold: float=0, thresh_freq: int=100, verbose: bool=False) -> Callable:
     """
     Fit a SINDy autoencoder (Champion et al., 2019) to high-dimensional data and its derivatives, following the same
     conventions as `get_NODE`. Returns a frozen Callable mapping x to the estimated xdot in the original space.
